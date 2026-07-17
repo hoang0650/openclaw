@@ -1,10 +1,51 @@
 {
   "gateway": {
+    "mode": "local",
     "bind": "lan",
-    "mode": "standalone",
-    "trustedProxies": ["10.0.0.0/8"],
+    "auth": {
+      "mode": "token"
+    },
     "controlUi": {
       "allowedOrigins": ["https://openclaw.phhotel.vn"]
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "featherless": {
+        "baseUrl": "https://api.featherless.ai/v1",
+        "apiKey": "${FEATHERLESS_API_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "Qwen/Qwen3-32B",
+            "name": "Featherless Qwen3 32B",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 32768,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "featherless/Qwen/Qwen3-32B"
+      },
+      "models": {
+        "featherless/Qwen/Qwen3-32B": {
+          "alias": "phhotel-main"
+        }
+      }
+    }
+  },
+  "skills": {
+    "entries": {
+      "phhotel-sales-agent": {
+        "enabled": true
+      }
     }
   }
 }

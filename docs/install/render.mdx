@@ -21,6 +21,8 @@ This creates a Render service from `render.yaml`, builds the Docker image, and d
 
 The Blueprint pins the active config to the persistent disk, copies the repo's `openclaw.json` into that path on each deploy, and starts the Gateway with `--bind lan` so Render's ingress can reach the container.
 
+Render is a **proxy TLS termination** deployment: browsers connect to the public `https://` URL, and Control UI upgrades to `wss://` on that same origin, while the Gateway inside the container still listens on plain HTTP for Render's internal proxy hop. Do **not** enable `gateway.tls.enabled` just because the public Render URL is HTTPS.
+
 ## The Blueprint
 
 ```yaml
@@ -63,6 +65,14 @@ services:
 | `generateValue: true` | Auto-generates a cryptographically secure value            |
 | `disk`                | Persistent storage that survives redeploys                 |
 
+## TLS model on Render
+
+- Public browser traffic uses Render-managed TLS, so the dashboard URL is `https://...` and the browser's WebSocket is `wss://...`.
+- The container should keep `gateway.mode: "local"` and `bind: "lan"` so Render's internal proxy can reach port `8080`.
+- Keep shared-secret auth (`gateway.auth.mode: "token"` or `"password"`) unless you add your own identity-aware proxy. A plain TLS terminator or load balancer is **not** a `trusted-proxy` deployment.
+- `gateway.controlUi.allowedOrigins` must include the exact HTTPS browser origin you use, such as `https://openclaw.phhotel.vn`.
+- Only enable `gateway.tls.enabled` when OpenClaw itself is the TLS terminator and you supply real cert/key files to the Gateway.
+
 ## Choosing a plan
 
 | Plan      | Spin-down         | Disk          | Best for                      |
@@ -77,7 +87,7 @@ The Blueprint defaults to `starter`. To use the free tier, change `plan: free` i
 
 ### Access the Control UI
 
-The web dashboard is available at `https://<your-service>.onrender.com/`. Connect using the shared secret: the auto-generated `OPENCLAW_GATEWAY_TOKEN` (find it in **Dashboard → your service → Environment**), or your password if you switched to password auth.
+The web dashboard is available at your Render HTTPS origin, such as `https://<your-service>.onrender.com/` or your attached custom domain like `https://openclaw.phhotel.vn/`. Connect using the shared secret: the auto-generated `OPENCLAW_GATEWAY_TOKEN` (find it in **Dashboard → your service → Environment**), or your password if you switched to password auth.
 
 ### Logs
 
@@ -92,6 +102,8 @@ The web dashboard is available at `https://<your-service>.onrender.com/`. Connec
 Edit variables in **Dashboard → your service → Environment**. Changes trigger an automatic redeploy.
 
 The Render Blueprint keeps Git as the source of truth for `openclaw.json`: every deploy copies `/app/openclaw.json` into `/data/.openclaw/openclaw.json` before startup. If you edit config from the Control UI or shell, those changes are overwritten on the next deploy unless you also commit them back to the repo.
+
+For public HTTPS use, keep the config aligned with the actual browser origin. If you switch between a custom domain and the default `onrender.com` hostname, add whichever exact HTTPS origin you plan to use to `gateway.controlUi.allowedOrigins` before redeploying.
 
 ### Auto-deploy
 
@@ -129,6 +141,8 @@ Check the deploy logs in the Render Dashboard. Common issues:
 - Port mismatch — ensure `OPENCLAW_GATEWAY_PORT=8080` so the gateway binds to the port Render expects
 - Config mismatch — run `openclaw config file` in the Render shell and confirm it prints `/data/.openclaw/openclaw.json`
 - Container reachable only locally — ensure the service starts with `--bind lan` (the Blueprint's `dockerCommand` already does this)
+- `origin not allowed` in the browser console or deploy logs — add the exact HTTPS dashboard origin to `gateway.controlUi.allowedOrigins` and redeploy
+- Trusted-proxy auth errors behind Render — revert to shared-secret token/password auth unless you have added your own identity-aware reverse proxy in front of Render
 
 ### Slow cold starts (free tier)
 
