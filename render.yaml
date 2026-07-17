@@ -4,10 +4,7 @@ services:
     runtime: docker
     plan: starter
     healthCheckPath: /healthz
-    dockerCommand: >-
-      /bin/sh -c 'install -d -m 700 /data/.openclaw /data/.openclaw/workspace &&
-      cp /app/openclaw.json /data/.openclaw/openclaw.json &&
-      exec node openclaw.mjs gateway --bind lan --port 8080'
+    dockerCommand: node openclaw.mjs gateway --bind lan --port 8080
     envVars:
       - key: OPENCLAW_GATEWAY_PORT
         value: "8080"
@@ -16,9 +13,9 @@ services:
       - key: OPENCLAW_STATE_DIR
         value: /data/.openclaw
       - key: OPENCLAW_CONFIG_DIR
-        value: /data/.openclaw
+        value: /app
       - key: OPENCLAW_CONFIG_PATH
-        value: /data/.openclaw/openclaw.json
+        value: /app/openclaw.json
       - key: OPENCLAW_WORKSPACE_DIR
         value: /data/.openclaw/workspace
       - key: OPENCLAW_GATEWAY_TOKEN
