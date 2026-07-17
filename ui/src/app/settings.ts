@@ -162,6 +162,27 @@ function deriveDefaultGatewayUrl(): { pageUrl: string; effectiveUrl: string } {
   return { pageUrl, effectiveUrl };
 }
 
+export function normalizeGatewayUrlForCurrentPage(gatewayUrl: string): string {
+  if (typeof window === "undefined" || window.location.protocol !== "https:") {
+    return gatewayUrl;
+  }
+  const raw = normalizeOptionalString(gatewayUrl);
+  if (!raw) {
+    return gatewayUrl;
+  }
+  try {
+    const parsed = new URL(raw, window.location.href);
+    const pageUrl = new URL(window.location.href);
+    if (parsed.protocol !== "ws:" || parsed.host !== pageUrl.host) {
+      return gatewayUrl;
+    }
+    parsed.protocol = "wss:";
+    return parsed.toString();
+  } catch {
+    return gatewayUrl;
+  }
+}
+
 /**
  * Standalone documents are owned by the Gateway that served their URL. Do not
  * let the full app's persisted remote selection retarget a security decision.
@@ -368,7 +389,9 @@ export function loadSettings(): UiSettings {
     }
     const parsed = source.parsed;
     const parsedGatewayUrl = source.gatewayUrl;
-    const gatewayUrl = parsedGatewayUrl === pageDerivedUrl ? defaultUrl : parsedGatewayUrl;
+    const gatewayUrl = normalizeGatewayUrlForCurrentPage(
+      parsedGatewayUrl === pageDerivedUrl ? defaultUrl : parsedGatewayUrl,
+    );
     const scopedSessionSelection = resolveScopedSessionSelection(gatewayUrl, parsed, defaults);
     const customTheme = parseImportedCustomTheme((parsed as { customTheme?: unknown }).customTheme);
     const { theme, mode } = parseThemeSelection(

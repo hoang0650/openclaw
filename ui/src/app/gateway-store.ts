@@ -15,7 +15,12 @@ import type {
   ApplicationGatewayConnection,
   ApplicationGatewaySnapshot,
 } from "./context.ts";
-import { loadSettings, patchSettings, persistSessionToken } from "./settings.ts";
+import {
+  loadSettings,
+  normalizeGatewayUrlForCurrentPage,
+  patchSettings,
+  persistSessionToken,
+} from "./settings.ts";
 
 type GatewayClientFactory = (opts: GatewayBrowserClientOptions) => GatewayBrowserClient;
 
@@ -105,7 +110,15 @@ export function createApplicationGateway(
 
   const connect = (overrides: ApplicationGatewayConnectOptions = {}) => {
     const { sessionKey: requestedSessionKey, ...connectionOverrides } = overrides;
-    const nextConnection = { ...connection, ...connectionOverrides };
+    const normalizedGatewayUrl =
+      connectionOverrides.gatewayUrl !== undefined
+        ? normalizeGatewayUrlForCurrentPage(connectionOverrides.gatewayUrl)
+        : connection.gatewayUrl;
+    const nextConnection = {
+      ...connection,
+      ...connectionOverrides,
+      gatewayUrl: normalizedGatewayUrl,
+    };
     const hasRequestedSessionKey = requestedSessionKey !== undefined;
     const nextSessionKey = hasRequestedSessionKey
       ? requestedSessionKey.trim()
