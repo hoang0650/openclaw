@@ -101,6 +101,24 @@ describe("checkBrowserOrigin", () => {
       expected: { ok: true as const, matchedBy: "allowlist" as const },
     },
     {
+      name: "accepts public https allowlist entries with a trailing slash",
+      input: {
+        requestHost: "openclaw.phhotel.vn",
+        origin: "https://openclaw.phhotel.vn",
+        allowedOrigins: [" https://openclaw.phhotel.vn/ "],
+      },
+      expected: { ok: true as const, matchedBy: "allowlist" as const },
+    },
+    {
+      name: "accepts public https allowlist entries with an explicit default port",
+      input: {
+        requestHost: "openclaw.phhotel.vn",
+        origin: "https://openclaw.phhotel.vn",
+        allowedOrigins: ["https://openclaw.phhotel.vn:443"],
+      },
+      expected: { ok: true as const, matchedBy: "allowlist" as const },
+    },
+    {
       name: "accepts wildcard allowlists even alongside specific entries",
       input: {
         requestHost: "gateway.tailnet.ts.net:18789",

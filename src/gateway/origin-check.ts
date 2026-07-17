@@ -43,6 +43,17 @@ function parseOrigin(
   }
 }
 
+function normalizeAllowlistedOrigin(originRaw?: string): string | null {
+  const normalized = normalizeOptionalLowercaseString(originRaw);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "*") {
+    return "*";
+  }
+  return parseOrigin(normalized)?.origin ?? null;
+}
+
 /** Validate a browser Origin against explicit allowlist, same-host, and local dev rules. */
 export function checkBrowserOrigin(params: {
   requestHost?: string;
@@ -58,7 +69,7 @@ export function checkBrowserOrigin(params: {
 
   const allowlist = new Set(
     (params.allowedOrigins ?? [])
-      .map((value) => normalizeOptionalLowercaseString(value))
+      .map((value) => normalizeAllowlistedOrigin(value))
       .filter(Boolean),
   );
   if (allowlist.has("*") || allowlist.has(parsedOrigin.origin)) {
