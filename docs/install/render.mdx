@@ -19,6 +19,8 @@ Deploy OpenClaw on [Render](https://render.com) using the repo's `render.yaml` B
 
 This creates a Render service from `render.yaml`, builds the Docker image, and deploys it. Your service URL follows the pattern `https://<service-name>.onrender.com`.
 
+The Blueprint pins the active config to the persistent disk, copies the repo's `openclaw.json` into that path on each deploy, and starts the Gateway with `--bind lan` so Render's ingress can reach the container.
+
 ## The Blueprint
 
 ```yaml
@@ -27,14 +29,24 @@ services:
     name: openclaw
     runtime: docker
     plan: starter
-    healthCheckPath: /health
+    healthCheckPath: /healthz
+    dockerCommand: >-
+      /bin/sh -c 'install -d -m 700 /data/.openclaw /data/.openclaw/workspace &&
+      cp /app/openclaw.json /data/.openclaw/openclaw.json &&
+      exec node openclaw.mjs gateway --bind lan --port 8080'
     envVars:
       - key: OPENCLAW_GATEWAY_PORT
         value: "8080"
+      - key: OPENCLAW_GATEWAY_BIND
+        value: lan
       - key: OPENCLAW_STATE_DIR
         value: /data/.openclaw
+      - key: OPENCLAW_CONFIG_DIR
+        value: /data/.openclaw
+      - key: OPENCLAW_CONFIG_PATH
+        value: /data/.openclaw/openclaw.json
       - key: OPENCLAW_WORKSPACE_DIR
-        value: /data/workspace
+        value: /data/.openclaw/workspace
       - key: OPENCLAW_GATEWAY_TOKEN
         generateValue: true # auto-generates a secure token
     disk:
@@ -46,7 +58,8 @@ services:
 | Feature               | Purpose                                                    |
 | --------------------- | ---------------------------------------------------------- |
 | `runtime: docker`     | Builds from the repo's Dockerfile                          |
-| `healthCheckPath`     | Render monitors `/health` and restarts unhealthy instances |
+| `healthCheckPath`     | Render monitors `/healthz` and restarts unhealthy instances |
+| `dockerCommand`       | Seeds `/data/.openclaw/openclaw.json` from the repo and binds the Gateway for Render ingress |
 | `generateValue: true` | Auto-generates a cryptographically secure value            |
 | `disk`                | Persistent storage that survives redeploys                 |
 
@@ -77,6 +90,8 @@ The web dashboard is available at `https://<your-service>.onrender.com/`. Connec
 ### Environment variables
 
 Edit variables in **Dashboard → your service → Environment**. Changes trigger an automatic redeploy.
+
+The Render Blueprint keeps Git as the source of truth for `openclaw.json`: every deploy copies `/app/openclaw.json` into `/data/.openclaw/openclaw.json` before startup. If you edit config from the Control UI or shell, those changes are overwritten on the next deploy unless you also commit them back to the repo.
 
 ### Auto-deploy
 
@@ -112,6 +127,8 @@ Check the deploy logs in the Render Dashboard. Common issues:
 
 - Missing `OPENCLAW_GATEWAY_TOKEN` — verify it is set in **Dashboard → Environment**
 - Port mismatch — ensure `OPENCLAW_GATEWAY_PORT=8080` so the gateway binds to the port Render expects
+- Config mismatch — run `openclaw config file` in the Render shell and confirm it prints `/data/.openclaw/openclaw.json`
+- Container reachable only locally — ensure the service starts with `--bind lan` (the Blueprint's `dockerCommand` already does this)
 
 ### Slow cold starts (free tier)
 
@@ -123,7 +140,7 @@ Happens on the free tier (no persistent disk). Upgrade to a paid plan, or regula
 
 ### Health check failures
 
-If builds succeed but deploys fail, the service may be taking too long to start or `/health` may not be reachable. Check:
+If builds succeed but deploys fail, the service may be taking too long to start or `/healthz` may not be reachable. Check:
 
 - Build logs for errors
 - Whether the container runs locally with `docker build && docker run`
