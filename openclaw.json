@@ -29,17 +29,36 @@
             "maxTokens": 4096
           }
         ]
+      },
+      "openrouter": {
+        "baseUrl": "https://api.openrouter.ai/v1",
+        "apiKey": "${OPENROUTER_API_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "nvidia/nemotron-3-embed-1b:free",
+            "name": "OpenRouter Nemotron 3",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 16000,
+            "maxTokens": 4096
+          }
+        ]
       }
     }
   },
   "agents": {
     "defaults": {
       "model": {
-        "primary": "featherless/Qwen/Qwen3-32B"
+        "primary": "featherless/Qwen/Qwen3-32B",
+        "secondary": "openrouter/nvidia/nemotron-3-embed-1b:free"
       },
       "models": {
         "featherless/Qwen/Qwen3-32B": {
           "alias": "phhotel-main"
+        },
+        "openrouter/nvidia/nemotron-3-embed-1b:free": {
+          "alias": "phhotel-openrouter"
         }
       }
     }
