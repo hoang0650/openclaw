@@ -23,7 +23,9 @@
           {
             "id": "Qwen/Qwen3-32B",
             "name": "Featherless Qwen3 32B",
-            "input": ["text"],
+            "input": [
+              "text"
+            ],
             "reasoning": true,
             "contextWindow": 32768,
             "maxTokens": 4096
@@ -38,36 +40,36 @@
           {
             "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
             "name": "OpenRouter Nemotron 3",
-            "input": ["text"],
+            "input": [
+              "text"
+            ],
             "reasoning": true,
-            "contextWindow": 20000,
-            "maxTokens": 4096
+            "contextWindow": 4096,
+            "maxTokens": 1024
           }
         ]
-      }
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "featherless/Qwen/Qwen3-32B",
-      "compaction": {
-        "reserveTokensFloor": 4096
       },
-      "models": {
-        "featherless/Qwen/Qwen3-32B": {
-          "alias": "phhotel-main"
-        },
-        "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
-          "alias": "phhotel-openrouter"
+      "agents": {
+        "defaults": {
+          "model": "featherless/Qwen/Qwen3-32B",
+          "compaction": {
+            "reserveTokensFloor": 1024
+          },
+          "models": {
+            "featherless/Qwen/Qwen3-32B": {
+              "alias": "phhotel-main"
+            },
+            "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
+              "alias": "phhotel-openrouter"
+            }
+          }
+        }
+      },
+      "skills": {
+        "entries": {
+          "phhotel-sales-agent": {
+            "enabled": true
+          }
         }
       }
     }
-  },
-  "skills": {
-    "entries": {
-      "phhotel-sales-agent": {
-        "enabled": true
-      }
-    }
-  }
-}
