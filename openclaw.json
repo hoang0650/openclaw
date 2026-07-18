@@ -48,29 +48,29 @@
             "maxTokens": 1024
           }
         ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "featherless/Qwen/Qwen3-32B",
+      "compaction": {
+        "reserveTokensFloor": 1024
       },
-      "agents": {
-        "defaults": {
-          "model": "featherless/Qwen/Qwen3-32B",
-          "compaction": {
-            "reserveTokensFloor": 1024
-          },
-          "models": {
-            "featherless/Qwen/Qwen3-32B": {
-              "alias": "phhotel-main"
-            },
-            "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
-              "alias": "phhotel-openrouter"
-            }
-          }
+      "models": {
+        "featherless/Qwen/Qwen3-32B": {
+          "alias": "phhotel-main"
+        },
+        "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
+          "alias": "phhotel-openrouter"
         }
-      },
-      "skills": {
-        "entries": {
-          "phhotel-sales-agent": {
-            "enabled": true
-          }
-        }
+      }
+    }
+  },
+  "skills": {
+    "entries": {
+      "phhotel-sales-agent": {
+        "enabled": true
       }
     }
   }
