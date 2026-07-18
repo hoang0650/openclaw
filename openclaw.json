@@ -49,10 +49,7 @@
   },
   "agents": {
     "defaults": {
-      "model": {
-        "primary": "featherless/Qwen/Qwen3-32B",
-        "secondary": "openrouter/nvidia/nemotron-3-embed-1b:free"
-      },
+      "model": "featherless/Qwen/Qwen3-32B",
       "models": {
         "featherless/Qwen/Qwen3-32B": {
           "alias": "phhotel-main"
