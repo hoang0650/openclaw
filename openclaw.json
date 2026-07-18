@@ -44,8 +44,8 @@
               "text"
             ],
             "reasoning": true,
-            "contextWindow": 4096,
-            "maxTokens": 1024
+            "contextWindow": 32768,
+            "maxTokens": 4096
           }
         ]
       }
@@ -55,7 +55,7 @@
     "defaults": {
       "model": "featherless/Qwen/Qwen3-32B",
       "compaction": {
-        "reserveTokensFloor": 1024
+        "reserveTokensFloor": 8837
       },
       "models": {
         "featherless/Qwen/Qwen3-32B": {
