@@ -40,7 +40,7 @@
             "name": "OpenRouter Nemotron 3",
             "input": ["text"],
             "reasoning": true,
-            "contextWindow": 32768,
+            "contextWindow": 20000,
             "maxTokens": 4096
           }
         ]
@@ -51,7 +51,7 @@
     "defaults": {
       "model": "featherless/Qwen/Qwen3-32B",
       "compaction": {
-        "reserveTokensFloor": 32768
+        "reserveTokensFloor": 20000
       },
       "models": {
         "featherless/Qwen/Qwen3-32B": {
