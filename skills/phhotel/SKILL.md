@@ -1,13 +1,19 @@
 ---
-name: phhotel-sales-agent
-description: Handles PHHotel room quotes, SePay deposit QR, payment confirmation, and booking closure. Invoke when users ask about availability, room rates, deposits, or booking via chat, fanpage, Zalo, or Telegram.
+name: phhotel
+description: "Handles PHHotel room quotes, SePay deposit QR, payment confirmation, and booking closure. Invoke when users ask about availability, room rates, deposits, or booking via chat, fanpage, Zalo, or Telegram."
+homepage: https://openclaw.phhotel.vn
 metadata:
-  openclaw:
-    requires:
-      env:
-        - NEST_BACKEND_URL
-        - NEST_API_TOKEN
-        - FEATHERLESS_API_KEY
+  {
+    "openclaw":
+      {
+        "emoji": "🏨",
+        "primaryEnv": "NEST_API_TOKEN",
+        "requires":
+          {
+            "env": ["NEST_BACKEND_URL", "NEST_API_TOKEN"],
+          },
+      },
+  }
 ---
 
 # PHHotel Sales Agent
