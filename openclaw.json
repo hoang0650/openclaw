@@ -6,7 +6,7 @@
       "mode": "token"
     },
     "controlUi": {
-      "basePath": "/openclaw",
+      "basePath": "/",
       "allowedOrigins": [
         "https://openclaw.phhotel.vn",
         "https://openclaw-deu7.onrender.com"

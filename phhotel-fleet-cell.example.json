@@ -6,11 +6,14 @@
       "mode": "token"
     },
     "controlUi": {
-      "basePath": "/openclaw",
+      "basePath": "/",
       "allowedOrigins": [
-        "https://openclaw-your-tenant.phhotel.vn"
+        "https://tenant-id.phhotel.vn"
       ]
     }
+  },
+  "phhotelFleet": {
+    "tenantPublicUrlTemplate": "https://{tenant}.phhotel.vn"
   },
   "agents": {
     "defaults": {
