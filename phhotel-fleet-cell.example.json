@@ -1,0 +1,27 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "auth": {
+      "mode": "token"
+    },
+    "controlUi": {
+      "basePath": "/openclaw",
+      "allowedOrigins": [
+        "https://openclaw-your-tenant.phhotel.vn"
+      ]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/node/.openclaw/workspace"
+    }
+  },
+  "skills": {
+    "entries": {
+      "phhotel-sales-agent": {
+        "enabled": true
+      }
+    }
+  }
+}
