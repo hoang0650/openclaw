@@ -69,7 +69,7 @@
   },
   "skills": {
     "entries": {
-      "phhotel-sales-agent": {
+      "phhotel": {
         "enabled": true,
         "env": {
           "NEST_BACKEND_URL": "https://api.phhotel.vn"
