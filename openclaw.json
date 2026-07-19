@@ -3,7 +3,8 @@
     "mode": "local",
     "bind": "lan",
     "auth": {
-      "mode": "token"
+      "mode": "token",
+      "tokenSeed": "phhotel-verify"
     },
     "controlUi": {
       "basePath": "/",
@@ -11,7 +12,7 @@
         "https://openclaw.phhotel.vn",
         "https://openclaw-deu7.onrender.com"
       ],
-      "dangerouslyAllowHostHeaderOriginFallback": true
+      "dangerouslyDisableDeviceAuth": true
     }
   },
   "models": {
@@ -23,14 +24,14 @@
         "api": "openai-completions",
         "models": [
           {
-            "id": "Qwen/Qwen3-32B",
-            "name": "Featherless Qwen3 32B",
+            "id": "MiniMaxAI/MiniMax-M2.5",
+            "name": "Featherless MiniMax-M2.5",
             "input": [
               "text"
             ],
             "reasoning": true,
-            "contextWindow": 32768,
-            "maxTokens": 4096
+            "contextWindow": 200000,
+            "maxTokens": 30000
           }
         ]
       },
@@ -55,12 +56,12 @@
   },
   "agents": {
     "defaults": {
-      "model": "featherless/Qwen/Qwen3-32B",
+      "model": "featherless/MiniMaxAI/MiniMax-M2.5",
       "compaction": {
-        "reserveTokensFloor": 8837
+        "reserveTokensFloor": 20000
       },
       "models": {
-        "featherless/Qwen/Qwen3-32B": {
+        "featherless/MiniMaxAI/MiniMax-M2.5": {
           "alias": "phhotel-main"
         },
         "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
@@ -71,7 +72,7 @@
   },
   "skills": {
     "entries": {
-      "phhotel-sales-agent": {
+      "phhotel": {
         "enabled": true
       }
     }
