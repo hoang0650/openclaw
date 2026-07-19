@@ -123,6 +123,7 @@ export function resolveApplicationStartupSettings(
       pendingGatewayToken = token;
     } else if (token) {
       updateSettings({ token });
+      pendingGatewayToken = token;
     }
     hashParams.delete("token");
     shouldCleanUrl = true;

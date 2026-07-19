@@ -324,9 +324,11 @@ export function bootstrapApplication(): ApplicationRuntime {
   applyStartupPresentation(settings);
   const router = createApplicationRouter();
   let pendingGatewayConnection =
-    startup.pendingGatewayUrl !== null
+    startup.pendingGatewayUrl !== null ||
+    startup.pendingBootstrapToken !== null ||
+    (startup.pendingGatewayToken ?? "").trim().length > 0
       ? {
-          gatewayUrl: startup.pendingGatewayUrl,
+          gatewayUrl: startup.pendingGatewayUrl ?? settings.gatewayUrl,
           token: startup.pendingGatewayToken ?? "",
           bootstrapToken: startup.pendingBootstrapToken ?? "",
         }
