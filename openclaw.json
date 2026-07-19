@@ -69,8 +69,16 @@
   },
   "skills": {
     "entries": {
-      "phhotel-sales-agent": {
-        "enabled": true
+      "phhotel": {
+        "enabled": true,
+        "apiKey": {
+          "source": "env",
+          "provider": "default",
+          "id": "NEST_API_TOKEN"
+        },
+        "env": {
+          "NEST_BACKEND_URL": "https://api.phhotel.vn"
+        }
       }
     }
   }
