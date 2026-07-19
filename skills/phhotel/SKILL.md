@@ -7,11 +7,8 @@ metadata:
     "openclaw":
       {
         "emoji": "🏨",
+        "always": true,
         "primaryEnv": "NEST_API_TOKEN",
-        "requires":
-          {
-            "env": ["NEST_BACKEND_URL", "NEST_API_TOKEN"],
-          },
       },
   }
 ---
@@ -31,8 +28,10 @@ Do not use this skill for management-only requests such as revenue, payroll, int
 
 ## Runtime Inputs
 
-- Base API URL: `$NEST_BACKEND_URL`
-- API auth: `Authorization: Bearer $NEST_API_TOKEN`
+- Preferred base API URL: `$NEST_BACKEND_URL`
+- Default base API URL when env is absent: `https://api.phhotel.vn`
+- Preferred API auth: `Authorization: Bearer $NEST_API_TOKEN`
+- If `NEST_API_TOKEN` is unavailable, rely on the authenticated PHHotel/OpenClaw bridge context already attached to the conversation and do not claim live verification unless the bridge/session clearly provides usable auth.
 - Default public hotel API host: `https://api.phhotel.vn`
 - Default public OpenClaw host: `https://openclaw.phhotel.vn`
 
@@ -63,10 +62,12 @@ If one of the booking fields is missing, ask only for the missing fields. Do not
 Always send:
 
 ```bash
-Authorization: Bearer $NEST_API_TOKEN
+Authorization: Bearer <runtime auth token>
 Accept: application/json
 Content-Type: application/json
 ```
+
+If a runtime auth token is not available, do not pretend to have verified live inventory or payment state.
 
 ### 1. Room types
 

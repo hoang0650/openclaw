@@ -55,7 +55,7 @@
     "defaults": {
       "model": "featherless/Qwen/Qwen3-32B",
       "compaction": {
-        "reserveTokensFloor": 8837
+        "reserveTokensFloor": 32000
       },
       "models": {
         "featherless/Qwen/Qwen3-32B": {
@@ -69,13 +69,8 @@
   },
   "skills": {
     "entries": {
-      "phhotel": {
+      "phhotel-sales-agent": {
         "enabled": true,
-        "apiKey": {
-          "source": "env",
-          "provider": "default",
-          "id": "NEST_API_TOKEN"
-        },
         "env": {
           "NEST_BACKEND_URL": "https://api.phhotel.vn"
         }
