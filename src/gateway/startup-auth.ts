@@ -21,6 +21,23 @@ import { assertGatewayAuthNotKnownWeak } from "./known-weak-gateway-secrets.js";
 const HOOKS_GATEWAY_AUTH_REUSE_WARNING =
   "Security warning: hooks.token matches active Gateway shared-secret auth. Startup continues for compatibility; rotate hooks.token or Gateway auth. Run openclaw security audit for a full report, and run openclaw doctor --fix when the reused hooks.token is persisted in config.";
 
+function deriveStableGatewayTokenFromEnv(env: NodeJS.ProcessEnv): string | undefined {
+  const seedCandidates = [
+    trimToUndefined(env.OPENCLAW_GATEWAY_TOKEN_SEED),
+    trimToUndefined(env.NEST_SERVICE_AUTH_SECRET),
+    trimToUndefined(env.PYTHON_AI_SHARED_SECRET),
+  ];
+  const seed = seedCandidates.find((value) => typeof value === "string" && value.length > 0);
+  if (!seed) {
+    return undefined;
+  }
+  return crypto
+    .createHash("sha256")
+    .update(`phhotel-openclaw-gateway:${seed}`)
+    .digest("hex")
+    .slice(0, 48);
+}
+
 /** Merge sparse runtime auth overrides into persisted Gateway auth config. */
 export function mergeGatewayAuthConfig(
   base?: GatewayAuthConfig,
@@ -227,7 +244,8 @@ export async function ensureGatewayStartupAuth(params: {
     return { cfg: params.cfg, auth: resolved, persistedGeneratedToken: false };
   }
 
-  const generatedToken = crypto.randomBytes(24).toString("hex");
+  const generatedToken =
+    deriveStableGatewayTokenFromEnv(env) ?? crypto.randomBytes(24).toString("hex");
   const nextCfg: OpenClawConfig = {
     ...params.cfg,
     gateway: {
