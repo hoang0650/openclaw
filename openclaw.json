@@ -55,7 +55,7 @@
     "defaults": {
       "model": "featherless/Qwen/Qwen3-32B",
       "compaction": {
-        "reserveTokensFloor": 32000
+        "reserveTokensFloor": 8837
       },
       "models": {
         "featherless/Qwen/Qwen3-32B": {
