@@ -9,7 +9,8 @@
       "basePath": "/",
       "allowedOrigins": [
         "https://tenant-id.phhotel.vn"
-      ]
+      ],
+      "dangerouslyAllowHostHeaderOriginFallback": true
     }
   },
   "phhotelFleet": {
