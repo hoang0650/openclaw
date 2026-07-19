@@ -1,4 +1,5 @@
 // Gateway run option resolution and local server startup command implementation.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { request } from "node:http";
 import path from "node:path";
@@ -72,6 +73,23 @@ const SUPERVISED_GATEWAY_LOCK_RETRY_MS = 5000;
 const SUPERVISED_GATEWAY_LOCK_RETRY_TIMEOUT_MS = 30_000;
 const SUPERVISED_GATEWAY_HEALTH_PROBE_TIMEOUT_MS = 1000;
 const GATEWAY_SHELL_ENV_CONVERGENCE_MAX_READS = 4;
+
+function deriveStableGatewayTokenFromEnv(env: NodeJS.ProcessEnv): string | undefined {
+  const seedCandidates = [
+    normalizeOptionalString(env.OPENCLAW_GATEWAY_TOKEN_SEED),
+    normalizeOptionalString(env.NEST_SERVICE_AUTH_SECRET),
+    normalizeOptionalString(env.PYTHON_AI_SHARED_SECRET),
+  ];
+  const seed = seedCandidates.find((value) => typeof value === "string" && value.length > 0);
+  if (!seed) {
+    return undefined;
+  }
+  return crypto
+    .createHash("sha256")
+    .update(`phhotel-openclaw-gateway:${seed}`)
+    .digest("hex")
+    .slice(0, 48);
+}
 
 type Awaitable<T> = T | Promise<T>;
 type GatewayRunLogger = Pick<ReturnType<typeof createSubsystemLogger>, "info" | "warn">;
@@ -904,8 +922,12 @@ export async function runGatewayCommand(opts: GatewayRunOpts, hooks: GatewayRunR
   const passwordValue = resolvedAuth.password;
   const hasToken = typeof tokenValue === "string" && tokenValue.trim().length > 0;
   const hasPassword = typeof passwordValue === "string" && passwordValue.trim().length > 0;
+  const derivedToken = deriveStableGatewayTokenFromEnv(process.env);
+  const runtimeTokenWillBeGenerated = resolvedAuthMode === "token";
   const tokenConfigured =
     hasToken ||
+    Boolean(derivedToken) ||
+    runtimeTokenWillBeGenerated ||
     hasConfiguredSecretInput(
       authOverride?.token ?? cfg.gateway?.auth?.token,
       cfg.secrets?.defaults,
