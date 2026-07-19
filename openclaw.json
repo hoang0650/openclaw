@@ -24,11 +24,12 @@
             "id": "MiniMaxAI/MiniMax-M2.5",
             "name": "Featherless MiniMax-M2.5",
             "input": [
-              "text","image"
+              "text",
+              "image"
             ],
             "reasoning": true,
             "contextWindow": 200000,
-            "maxTokens": 200000
+            "maxTokens": 4096
           }
         ]
       },
