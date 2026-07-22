@@ -3,7 +3,8 @@
     "mode": "local",
     "bind": "lan",
     "auth": {
-      "mode": "token"
+      "mode": "token",
+      "allowAutoApprove": true
     },
     "controlUi": {
       "basePath": "/",
