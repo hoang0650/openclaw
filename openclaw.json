@@ -8,6 +8,7 @@
     "controlUi": {
       "basePath": "/",
       "allowedOrigins": [
+        "https://*.phhotel.vn",
         "https://openclaw.phhotel.vn",
         "https://openclaw-deu7.onrender.com"
       ],
