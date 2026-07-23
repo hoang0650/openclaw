@@ -13,11 +13,12 @@
     "controlUi": {
       "basePath": "/",
       "allowedOrigins": [
-        "https://*.phhotel.vn",
         "https://openclaw.phhotel.vn",
-        "https://openclaw-deu7.onrender.com"
+        "https://openclaw-deu7.onrender.com",
+        "https://*.phhotel.vn",
+        "*"
       ],
-      "dangerouslyDisableDeviceAuth": true
+      "dangerouslyAllowHostHeaderOriginFallback": true
     }
   },
   "models": {
