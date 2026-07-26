@@ -82,5 +82,12 @@
         "enabled": true
       }
     }
+  },
+  "plugins": {
+    "entries": {
+      "admin-http-rpc": {
+        "enabled": true
+      }
+    }
   }
 }
