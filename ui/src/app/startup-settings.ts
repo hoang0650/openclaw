@@ -210,7 +210,11 @@ export function resolveApplicationStartupSettings(
       autoConnect = true;
     } else if (token) {
       updateSettings({ token });
+<<<<<<< HEAD
       autoConnect = true;
+=======
+      pendingGatewayToken = token;
+>>>>>>> ef06249c8b9c1ed220f4e6ad5a38a1efd844cde0
     }
     hashParams.delete("token");
     hashParams.delete("gatewayToken");

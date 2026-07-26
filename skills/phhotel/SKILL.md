@@ -1,5 +1,5 @@
 ---
-name: phhotel-sales-agent
+name: phhotel
 description: Handles PHHotel room quotes, SePay deposit QR, payment confirmation, and booking closure. Invoke when users ask about availability, room rates, deposits, or booking via chat, fanpage, Zalo, or Telegram.
 metadata:
   openclaw:

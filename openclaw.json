@@ -2,6 +2,11 @@
   "gateway": {
     "mode": "local",
     "bind": "lan",
+    "trustedProxies": [
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16"
+    ],
     "auth": {
       "mode": "token"
     },
@@ -9,7 +14,13 @@
       "basePath": "/",
       "allowedOrigins": [
         "https://openclaw.phhotel.vn",
+<<<<<<< HEAD
         "https://openclaw-deu7.onrender.com"
+=======
+        "https://openclaw-deu7.onrender.com",
+        "https://*.phhotel.vn",
+        "*"
+>>>>>>> ef06249c8b9c1ed220f4e6ad5a38a1efd844cde0
       ],
       "dangerouslyAllowHostHeaderOriginFallback": true
     }
@@ -23,14 +34,14 @@
         "api": "openai-completions",
         "models": [
           {
-            "id": "Qwen/Qwen3-32B",
-            "name": "Featherless Qwen3 32B",
+            "id": "MiniMaxAI/MiniMax-M2.5",
+            "name": "Featherless MiniMax-M2.5",
             "input": [
               "text"
             ],
             "reasoning": true,
-            "contextWindow": 32768,
-            "maxTokens": 4096
+            "contextWindow": 200000,
+            "maxTokens": 30000
           }
         ]
       },
@@ -55,12 +66,12 @@
   },
   "agents": {
     "defaults": {
-      "model": "featherless/Qwen/Qwen3-32B",
+      "model": "featherless/MiniMaxAI/MiniMax-M2.5",
       "compaction": {
-        "reserveTokensFloor": 8837
+        "reserveTokensFloor": 20000
       },
       "models": {
-        "featherless/Qwen/Qwen3-32B": {
+        "featherless/MiniMaxAI/MiniMax-M2.5": {
           "alias": "phhotel-main"
         },
         "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
@@ -71,7 +82,7 @@
   },
   "skills": {
     "entries": {
-      "phhotel-sales-agent": {
+      "phhotel": {
         "enabled": true
       }
     }
