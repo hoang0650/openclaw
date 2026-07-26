@@ -6,10 +6,12 @@
       "mode": "token"
     },
     "controlUi": {
+      "basePath": "/",
       "allowedOrigins": [
         "https://openclaw.phhotel.vn",
         "https://openclaw-deu7.onrender.com"
-      ]
+      ],
+      "dangerouslyAllowHostHeaderOriginFallback": true
     }
   },
   "models": {

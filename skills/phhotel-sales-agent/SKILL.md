@@ -25,8 +25,10 @@ Do not use this skill for management-only requests such as revenue, payroll, int
 
 ## Runtime Inputs
 
-- Base API URL: `$NEST_BACKEND_URL`
-- API auth: `Authorization: Bearer $NEST_API_TOKEN`
+- Default base API URL: `https://api.phhotel.vn`
+- Optional override base API URL: `$NEST_BACKEND_URL`
+- Preferred API auth: `Authorization: Bearer $NEST_API_TOKEN`
+- If runtime auth is unavailable, do not claim live verification for room inventory, pricing, payment status, or booking creation.
 - Default public hotel API host: `https://api.phhotel.vn`
 - Default public OpenClaw host: `https://openclaw.phhotel.vn`
 
@@ -57,17 +59,19 @@ If one of the booking fields is missing, ask only for the missing fields. Do not
 Always send:
 
 ```bash
-Authorization: Bearer $NEST_API_TOKEN
+Authorization: Bearer <runtime auth token>
 Accept: application/json
 Content-Type: application/json
 ```
+
+If no runtime auth token is available, stop at guidance/collection and explain that live verification cannot be completed right now.
 
 ### 1. Room types
 
 Use:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/room-categories?hotelId=<HOTEL_ID>" \
+curl -sS "https://api.phhotel.vn/room-categories?hotelId=<HOTEL_ID>" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Accept: application/json"
 ```
@@ -75,7 +79,7 @@ curl -sS "$NEST_BACKEND_URL/room-categories?hotelId=<HOTEL_ID>" \
 If room-category data is incomplete, use:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/rooms/room-types?hotelId=<HOTEL_ID>" \
+curl -sS "https://api.phhotel.vn/rooms/room-types?hotelId=<HOTEL_ID>" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Accept: application/json"
 ```
@@ -85,7 +89,7 @@ curl -sS "$NEST_BACKEND_URL/rooms/room-types?hotelId=<HOTEL_ID>" \
 Use:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/rooms/available?hotelId=<HOTEL_ID>&checkInDate=<YYYY-MM-DD>&checkOutDate=<YYYY-MM-DD>" \
+curl -sS "https://api.phhotel.vn/rooms/available?hotelId=<HOTEL_ID>&checkInDate=<YYYY-MM-DD>&checkOutDate=<YYYY-MM-DD>" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Accept: application/json"
 ```
@@ -93,7 +97,7 @@ curl -sS "$NEST_BACKEND_URL/rooms/available?hotelId=<HOTEL_ID>&checkInDate=<YYYY
 If the user only needs a quick snapshot of current rooms, you may also use:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/rooms?hotelId=<HOTEL_ID>&lite=1" \
+curl -sS "https://api.phhotel.vn/rooms?hotelId=<HOTEL_ID>&lite=1" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Accept: application/json"
 ```
@@ -103,7 +107,7 @@ curl -sS "$NEST_BACKEND_URL/rooms?hotelId=<HOTEL_ID>&lite=1" \
 Use the room type id with:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/priceConfig/hotel/<HOTEL_ID>/roomType/<ROOM_TYPE_ID>" \
+curl -sS "https://api.phhotel.vn/priceConfig/hotel/<HOTEL_ID>/roomType/<ROOM_TYPE_ID>" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Accept: application/json"
 ```
@@ -111,7 +115,7 @@ curl -sS "$NEST_BACKEND_URL/priceConfig/hotel/<HOTEL_ID>/roomType/<ROOM_TYPE_ID>
 If needed, use:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/priceConfig/calculate" \
+curl -sS "https://api.phhotel.vn/priceConfig/calculate" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"hotelId":"<HOTEL_ID>","roomTypeId":"<ROOM_TYPE_ID>","checkInDate":"<YYYY-MM-DD>","checkOutDate":"<YYYY-MM-DD>","numberOfGuests":2,"numberOfRooms":1}'
@@ -122,7 +126,7 @@ curl -sS "$NEST_BACKEND_URL/priceConfig/calculate" \
 Use:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/sepay/create-payment-history" \
+curl -sS "https://api.phhotel.vn/sepay/create-payment-history" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -150,7 +154,7 @@ Return the QR/payment code and tell the guest to transfer with the exact content
 Check payment status with either `paymentCode` or `paymentHistoryId`:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/sepay/payment-status?hotelId=<HOTEL_ID>&paymentCode=<PAYMENT_CODE>" \
+curl -sS "https://api.phhotel.vn/sepay/payment-status?hotelId=<HOTEL_ID>&paymentCode=<PAYMENT_CODE>" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Accept: application/json"
 ```
@@ -164,7 +168,7 @@ Note: the real booking settlement is finalized by the backend SePay webhook. You
 After payment confirmation, create the booking:
 
 ```bash
-curl -sS "$NEST_BACKEND_URL/bookings" \
+curl -sS "https://api.phhotel.vn/bookings" \
   -H "Authorization: Bearer $NEST_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

@@ -331,6 +331,24 @@ export function bootstrapApplication(): ApplicationRuntime {
           bootstrapToken: startup.pendingBootstrapToken ?? "",
         }
       : null;
+  // Auto-login from PHHotel: confirm pending gateway handoff immediately.
+  if (startup.autoConnect && pendingGatewayConnection) {
+    const pending = pendingGatewayConnection;
+    pendingGatewayConnection = null;
+    gateway.connect({
+      gatewayUrl: pending.gatewayUrl,
+      token: pending.token || startup.settings.token,
+      bootstrapToken: pending.bootstrapToken,
+      ...(startup.password ? { password: startup.password } : {}),
+    });
+  } else if (startup.autoConnect && (startup.settings.token || startup.password)) {
+    // Credentials already applied from #token/#password — connect immediately.
+    gateway.connect({
+      gatewayUrl: startup.settings.gatewayUrl,
+      token: startup.settings.token,
+      ...(startup.password ? { password: startup.password } : {}),
+    });
+  }
   let lastConfigRefreshClient: GatewayBrowserClient | null = null;
   const stopConfigRefresh = gateway.subscribe((snapshot) => {
     if (!snapshot.connected || !snapshot.client) {

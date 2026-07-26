@@ -102,6 +102,43 @@ describe("resolveApplicationStartupSettings", () => {
     expect(startup.pendingBootstrapToken).toBe("boot-456");
     expect(startup.location).toEqual({ pathname: "/dash", search: "", hash: "" });
   });
+
+  it("applies PHHotel auto-login hash with gatewayToken/password/autoConnect", () => {
+    const startup = resolveApplicationStartupSettings(makeSettings("wss://old.example"), {
+      pathname: "/",
+      search: "",
+      hash: "#gatewayUrl=wss%3A%2F%2Fhotel.phhotel.vn&token=gtok-123&gatewayToken=gtok-123&password=gtok-123&autoConnect=true&session=main",
+    });
+
+    expect(startup.autoConnect).toBe(true);
+    expect(startup.settings.gatewayUrl).toBe("wss://hotel.phhotel.vn");
+    expect(startup.settings.token).toBe("gtok-123");
+    expect(startup.password).toBe("gtok-123");
+    expect(startup.pendingGatewayUrl).toBeNull();
+    expect(startup.location.hash).not.toContain("token=");
+    expect(startup.location.hash).not.toContain("password=");
+  });
+
+  it("accepts base64 #config= payload aliases", () => {
+    const payload = btoa(
+      JSON.stringify({
+        gatewayUrl: "wss://cfg.example",
+        gatewayToken: "cfg-token",
+        password: "cfg-token",
+        autoConnect: true,
+      }),
+    );
+    const startup = resolveApplicationStartupSettings(makeSettings("wss://old.example"), {
+      pathname: "/",
+      search: "",
+      hash: `#config=${payload}`,
+    });
+
+    expect(startup.autoConnect).toBe(true);
+    expect(startup.settings.gatewayUrl).toBe("wss://cfg.example");
+    expect(startup.settings.token).toBe("cfg-token");
+    expect(startup.password).toBe("cfg-token");
+  });
 });
 
 describe("loadSettings default gateway URL derivation", () => {
