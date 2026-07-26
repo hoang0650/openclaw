@@ -133,7 +133,11 @@ export function resolveApplicationStartupSettings(
 
   const configPayload = decodeConfigPayload(readParam(params, hashParams, "config"));
   if (configPayload) {
-    if (!params.get("gatewayUrl") && !hashParams.get("gatewayUrl") && typeof configPayload.gatewayUrl === "string") {
+    if (
+      !params.get("gatewayUrl") &&
+      !hashParams.get("gatewayUrl") &&
+      typeof configPayload.gatewayUrl === "string"
+    ) {
       hashParams.set("gatewayUrl", configPayload.gatewayUrl);
     }
     if (!params.get("url") && !hashParams.get("url") && typeof configPayload.url === "string") {
@@ -210,11 +214,7 @@ export function resolveApplicationStartupSettings(
       autoConnect = true;
     } else if (token) {
       updateSettings({ token });
-<<<<<<< HEAD
       autoConnect = true;
-=======
-      pendingGatewayToken = token;
->>>>>>> ef06249c8b9c1ed220f4e6ad5a38a1efd844cde0
     }
     hashParams.delete("token");
     hashParams.delete("gatewayToken");

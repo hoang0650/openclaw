@@ -14,13 +14,9 @@
       "basePath": "/",
       "allowedOrigins": [
         "https://openclaw.phhotel.vn",
-<<<<<<< HEAD
-        "https://openclaw-deu7.onrender.com"
-=======
         "https://openclaw-deu7.onrender.com",
         "https://*.phhotel.vn",
         "*"
->>>>>>> ef06249c8b9c1ed220f4e6ad5a38a1efd844cde0
       ],
       "dangerouslyAllowHostHeaderOriginFallback": true
     }

@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 {
   "gateway": {
     "mode": "local",
@@ -24,42 +23,9 @@
   },
   "skills": {
     "entries": {
-      "phhotel-sales-agent": {
+      "phhotel": {
         "enabled": true
       }
     }
   }
 }
-=======
-{
-  "gateway": {
-    "mode": "local",
-    "bind": "lan",
-    "auth": {
-      "mode": "token"
-    },
-    "controlUi": {
-      "basePath": "/",
-      "allowedOrigins": [
-        "https://tenant-id.phhotel.vn"
-      ],
-      "dangerouslyAllowHostHeaderOriginFallback": true
-    }
-  },
-  "phhotelFleet": {
-    "tenantPublicUrlTemplate": "https://{tenant}.phhotel.vn"
-  },
-  "agents": {
-    "defaults": {
-      "workspace": "/home/node/.openclaw/workspace"
-    }
-  },
-  "skills": {
-    "entries": {
-      "phhotel-sales-agent": {
-        "enabled": true
-      }
-    }
-  }
-}
->>>>>>> ef06249c8b9c1ed220f4e6ad5a38a1efd844cde0
