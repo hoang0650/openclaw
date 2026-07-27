@@ -236,6 +236,13 @@ export abstract class AppSidebarSessionMutationsElement extends AppSidebarSessio
       if (!this.isSessionMutationScopeCurrent(scope)) {
         return;
       }
+      if (!outcome.deleted) {
+        this.publishSessionMutationError(
+          scope,
+          scope.sessions.state.error ?? "Session was not deleted",
+        );
+        return;
+      }
       // Dirty/unpushed checkouts survive deletion; offer explicit removal.
       if (outcome.worktreePreserved) {
         const preserved = outcome.worktreePreserved;
@@ -260,7 +267,7 @@ export abstract class AppSidebarSessionMutationsElement extends AppSidebarSessio
           }
         }
       }
-      if (!outcome.deleted || !session.active) {
+      if (!session.active) {
         return;
       }
       this.replaceCurrentSession(

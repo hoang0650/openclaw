@@ -174,11 +174,11 @@ describe("session menu", () => {
     expect(menuItem(menu, "Pin session").disabled).toBe(true);
   });
 
-  it("disables archive and delete when an active session cannot be archived", async () => {
+  it("hides delete and disables archive when an active session cannot be archived", async () => {
     const menu = await mountMenu({ archiveAllowed: false });
 
     expect(menuItem(menu, "Archive session").disabled).toBe(true);
-    expect(menuItem(menu, "Delete…").disabled).toBe(true);
+    expect(menuItemLabels(menu)).not.toContain("Delete…");
   });
 
   it("closes before dispatching Pin", async () => {

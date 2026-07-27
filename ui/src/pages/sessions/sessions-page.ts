@@ -617,10 +617,14 @@ class SessionsPage extends OpenClawLightDomElement {
     this.sessionMutationPending = true;
     try {
       const result = await scope.sessions.deleteMany(
-        keys.map((key) => ({
-          key,
-          agentId: this.sessionAgentId(key, scope.context),
-        })),
+        keys.map((key) => {
+          const row = this.result?.sessions.find((session) => session.key === key);
+          return {
+            key,
+            agentId: this.sessionAgentId(key, scope.context),
+            alreadyArchived: row?.archived === true,
+          };
+        }),
       );
       if (!this.isRequestScopeCurrent(scope)) {
         return;

@@ -359,7 +359,99 @@ describe("createSessionCapability", () => {
 
     await expect(sessions.delete(key)).resolves.toEqual({ deleted: false });
     expect(sessions.state.deletedSessions).toEqual([]);
+    expect(sessions.state.error).toContain("not deleted");
     expect(request).toHaveBeenCalledTimes(1);
+    sessions.dispose();
+  });
+
+  it("archives then deletes with archivedOnly when operator.admin is missing", async () => {
+    const key = "agent:main:chat-1";
+    const request = vi.fn(async (method: string, params?: unknown) => {
+      if (method === "sessions.patch") {
+        expect(params).toMatchObject({ key, archived: true });
+        return { ok: true };
+      }
+      if (method === "sessions.delete") {
+        expect(params).toMatchObject({ key, archivedOnly: true, deleteTranscript: true });
+        return { ok: true, deleted: true };
+      }
+      if (method === "sessions.list") {
+        return sessionsResult([], 1);
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    const gateway = {
+      get snapshot() {
+        return {
+          client,
+          connected: true,
+          sessionKey: "agent:main:main",
+          assistantAgentId: "main",
+          hello: {
+            auth: { role: "operator", scopes: ["operator.read", "operator.write"] },
+          } as GatewayHelloOk,
+        };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      subscribeEvents() {
+        return () => undefined;
+      },
+    };
+    const sessions = createSessionCapability(gateway);
+
+    await expect(sessions.delete(key)).resolves.toEqual({ deleted: true });
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      "sessions.patch",
+      "sessions.delete",
+      "sessions.list",
+    ]);
+    sessions.dispose();
+  });
+
+  it("skips pre-archive when alreadyArchived is set for write-scoped delete", async () => {
+    const key = "agent:main:archived-1";
+    const request = vi.fn(async (method: string, params?: unknown) => {
+      if (method === "sessions.delete") {
+        expect(params).toMatchObject({ key, archivedOnly: true });
+        return { ok: true, deleted: true };
+      }
+      if (method === "sessions.list") {
+        return sessionsResult([], 1);
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    const gateway = {
+      get snapshot() {
+        return {
+          client,
+          connected: true,
+          sessionKey: "agent:main:main",
+          assistantAgentId: "main",
+          hello: {
+            auth: { role: "operator", scopes: ["operator.read", "operator.write"] },
+          } as GatewayHelloOk,
+        };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      subscribeEvents() {
+        return () => undefined;
+      },
+    };
+    const sessions = createSessionCapability(gateway);
+
+    await expect(sessions.delete(key, { alreadyArchived: true })).resolves.toEqual({
+      deleted: true,
+    });
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      "sessions.delete",
+      "sessions.list",
+    ]);
     sessions.dispose();
   });
 

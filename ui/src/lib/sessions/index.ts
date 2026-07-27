@@ -17,6 +17,7 @@ import type {
   SessionWorkspaceListResult,
   SessionWorkspaceSetResult,
 } from "../../api/types.ts";
+import { hasOperatorAdminAccess } from "../../app/operator-access.ts";
 import { getSafeLocalStorage } from "../../local-storage.ts";
 import { isGatewayMethodAdvertised } from "../gateway-methods.ts";
 import { isSessionRunActive } from "../session-run-state.ts";
@@ -98,12 +99,22 @@ export type { SessionPatch } from "./patch.ts";
 type SessionDeleteOptions = {
   agentId?: string;
   deleteTranscript?: boolean;
+  /**
+   * Archive-then-delete contract for write-scoped operators. When omitted, the
+   * capability infers it from hello.auth scopes (admin → direct delete; otherwise
+   * archive first + archivedOnly).
+   */
+  archivedOnly?: boolean;
+  /** Skip the pre-delete archive patch (session is already archived). */
+  alreadyArchived?: boolean;
 };
 
 type SessionDeleteTarget = {
   key: string;
   agentId?: string;
   deleteTranscript?: boolean;
+  archivedOnly?: boolean;
+  alreadyArchived?: boolean;
 };
 
 /** Dirty/unpushed checkouts survive session deletion; callers surface them. */
@@ -361,6 +372,7 @@ function requestSessionDelete(
   return client.request<SessionDeleteResponse>("sessions.delete", {
     ...buildSessionRequestParams(key, options.agentId),
     deleteTranscript: options.deleteTranscript ?? true,
+    ...(options.archivedOnly === true ? { archivedOnly: true } : {}),
   });
 }
 
@@ -1175,6 +1187,33 @@ export function createSessionCapability(gateway: SessionGateway): SessionCapabil
     return true;
   };
 
+  const resolveDeleteArchivedOnly = (options: { archivedOnly?: boolean }): boolean => {
+    if (options.archivedOnly === true) {
+      return true;
+    }
+    if (options.archivedOnly === false) {
+      return false;
+    }
+    // Write-scoped Control UI devices can only delete via the archive-then-delete
+    // contract. Admin keeps the direct-delete path.
+    return !hasOperatorAdminAccess(gateway.snapshot.hello?.auth ?? null);
+  };
+
+  const prepareAndDeleteSession = async (
+    client: SessionRequestClient,
+    key: string,
+    options: SessionDeleteOptions,
+  ): Promise<SessionDeleteResponse> => {
+    const archivedOnly = resolveDeleteArchivedOnly(options);
+    if (archivedOnly && options.alreadyArchived !== true) {
+      await requestSessionPatch(client, key, { archived: true }, { agentId: options.agentId });
+    }
+    return requestSessionDelete(client, key, {
+      ...options,
+      archivedOnly: archivedOnly ? true : undefined,
+    });
+  };
+
   const remove = async (
     key: string,
     options: SessionDeleteOptions = {},
@@ -1184,14 +1223,19 @@ export function createSessionCapability(gateway: SessionGateway): SessionCapabil
       return { deleted: false };
     }
     try {
-      const response = await requestSessionDelete(scope.client, key, options);
+      const response = await prepareAndDeleteSession(scope.client, key, options);
       if (!isCurrentConnection(scope)) {
         return { deleted: false };
       }
       if (!confirmsSessionDeletion(response)) {
+        publish({
+          ...state,
+          error:
+            "Session was not deleted (main sessions cannot be deleted; write-scope requires archive-then-delete).",
+        });
         return { deleted: false };
       }
-      publish({ ...state, deletedSessions: [{ key, agentId: options.agentId }] });
+      publish({ ...state, deletedSessions: [{ key, agentId: options.agentId }], error: null });
       setModelOverride(key, undefined);
       await refreshReplacement(options.agentId);
       return {
@@ -1222,11 +1266,12 @@ export function createSessionCapability(gateway: SessionGateway): SessionCapabil
         break;
       }
       try {
-        const response = await requestSessionDelete(scope.client, target.key, target);
+        const response = await prepareAndDeleteSession(scope.client, target.key, target);
         if (!isCurrentConnection(scope)) {
           break;
         }
         if (!confirmsSessionDeletion(response)) {
+          errors.push(`${target.key}: not deleted`);
           continue;
         }
         deleted.push(target.key);
@@ -1241,11 +1286,14 @@ export function createSessionCapability(gateway: SessionGateway): SessionCapabil
       publish({
         ...state,
         deletedSessions: targets.filter((target) => deleted.includes(target.key)),
+        error: errors.length > 0 ? errors.join("; ") : null,
       });
       for (const key of deleted) {
         setModelOverride(key, undefined);
       }
       await refreshReplacement();
+    } else if (errors.length > 0 && isCurrentConnection(scope)) {
+      publish({ ...state, error: errors.join("; ") });
     }
     return isCurrentConnection(scope)
       ? { deleted, errors, preservedWorktrees }

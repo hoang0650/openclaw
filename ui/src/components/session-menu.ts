@@ -422,22 +422,28 @@ class SessionMenu extends OpenClawLightDomElement {
           >
           ${menuShortcutHint("a")}
         </wa-dropdown-item>
-        <wa-dropdown-item
-          class="session-menu__item session-menu__item--destructive"
-          value="delete"
-          variant="danger"
-          data-shortcut="d"
-          aria-keyshortcuts="D"
-          ?disabled=${this.disabled || !(session.archived || this.archiveAllowed)}
-        >
-          <span slot="icon" class="session-menu__icon" aria-hidden="true">${icons.trash}</span>
-          <span class="session-menu__text"
-            >${batch
-              ? t("sessionsView.deleteSessionCount", { count })
-              : t("sessionsView.deleteSessionMenu")}</span
-          >
-          ${menuShortcutHint("d")}
-        </wa-dropdown-item>
+        ${session.archived || this.archiveAllowed
+          ? html`
+              <wa-dropdown-item
+                class="session-menu__item session-menu__item--destructive"
+                value="delete"
+                variant="danger"
+                data-shortcut="d"
+                aria-keyshortcuts="D"
+                ?disabled=${this.disabled}
+              >
+                <span slot="icon" class="session-menu__icon" aria-hidden="true"
+                  >${icons.trash}</span
+                >
+                <span class="session-menu__text"
+                  >${batch
+                    ? t("sessionsView.deleteSessionCount", { count })
+                    : t("sessionsView.deleteSessionMenu")}</span
+                >
+                ${menuShortcutHint("d")}
+              </wa-dropdown-item>
+            `
+          : nothing}
       </wa-dropdown>`,
     );
   }
