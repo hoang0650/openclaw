@@ -30,11 +30,25 @@
         "api": "openai-completions",
         "models": [
           {
+            "id": "deepseek-ai/DeepSeek-V4-Flash",
+            "name": "DeepSeek V4 Flash (default / sales — max margin)",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 262144,
+            "maxTokens": 16384
+          },
+          {
+            "id": "Qwen/Qwen3.6-35B-A3B",
+            "name": "Qwen3.6 35B-A3B (chatbox / VI fallback)",
+            "input": ["text"],
+            "reasoning": false,
+            "contextWindow": 131072,
+            "maxTokens": 8192
+          },
+          {
             "id": "MiniMaxAI/MiniMax-M2.5",
-            "name": "Featherless MiniMax-M2.5",
-            "input": [
-              "text"
-            ],
+            "name": "MiniMax M2.5 (OpenClaw premium agent)",
+            "input": ["text"],
             "reasoning": true,
             "contextWindow": 200000,
             "maxTokens": 30000
@@ -48,10 +62,8 @@
         "models": [
           {
             "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
-            "name": "OpenRouter Nemotron 3",
-            "input": [
-              "text"
-            ],
+            "name": "OpenRouter Nemotron 3 (emergency free fallback)",
+            "input": ["text"],
             "reasoning": true,
             "contextWindow": 32768,
             "maxTokens": 4096
@@ -62,13 +74,19 @@
   },
   "agents": {
     "defaults": {
-      "model": "featherless/MiniMaxAI/MiniMax-M2.5",
+      "model": "featherless/deepseek-ai/DeepSeek-V4-Flash",
       "compaction": {
         "reserveTokensFloor": 20000
       },
       "models": {
-        "featherless/MiniMaxAI/MiniMax-M2.5": {
+        "featherless/deepseek-ai/DeepSeek-V4-Flash": {
           "alias": "phhotel-main"
+        },
+        "featherless/Qwen/Qwen3.6-35B-A3B": {
+          "alias": "phhotel-sales"
+        },
+        "featherless/MiniMaxAI/MiniMax-M2.5": {
+          "alias": "phhotel-premium"
         },
         "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
           "alias": "phhotel-openrouter"
