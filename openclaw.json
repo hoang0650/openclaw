@@ -111,6 +111,13 @@
     "entries": {
       "admin-http-rpc": {
         "enabled": true
+      },
+      "phhotel-usage": {
+        "enabled": true,
+        "config": {
+          "apiBaseUrl": "${PHHOTEL_API_URL}",
+          "serviceSecret": "${NEST_SERVICE_AUTH_SECRET}"
+        }
       }
     }
   }

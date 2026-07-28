@@ -1,0 +1,45 @@
+{
+  "id": "phhotel-usage",
+  "activation": {
+    "onStartup": true
+  },
+  "name": "PHHotel AI Usage",
+  "description": "Report OpenClaw LLM token usage to PHHotel AI quota (channel: openclaw).",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiBaseUrl": {
+        "type": "string"
+      },
+      "serviceSecret": {
+        "type": "string"
+      },
+      "hotelId": {
+        "type": "string"
+      },
+      "userId": {
+        "type": "string"
+      }
+    }
+  },
+  "uiHints": {
+    "apiBaseUrl": {
+      "label": "PHHotel API base URL",
+      "help": "Default: https://api.phhotel.vn or env PHHOTEL_API_URL"
+    },
+    "serviceSecret": {
+      "label": "Service secret",
+      "sensitive": true,
+      "help": "Must match NEST_SERVICE_AUTH_SECRET on phhotel-api"
+    },
+    "hotelId": {
+      "label": "Default hotel id",
+      "help": "Fallback when session is not hotel-<id>"
+    },
+    "userId": {
+      "label": "Default user id",
+      "advanced": true
+    }
+  }
+}
