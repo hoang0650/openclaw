@@ -18,6 +18,24 @@ services:
         value: /app/openclaw.json
       - key: OPENCLAW_WORKSPACE_DIR
         value: /data/.openclaw/workspace
+      # Nest hotel-ops: prefer mint via service secret (same as PHGroup-AI)
+      - key: NEST_BACKEND_URL
+        value: https://api.phhotel.vn
+      - key: PHHOTEL_API_URL
+        value: https://api.phhotel.vn
+      - key: NEST_SERVICE_AUTH_SECRET
+        sync: false
+      - key: NEST_SERVICE_USER_ID
+        sync: false
+      - key: NEST_SERVICE_USERNAME
+        sync: false
+      - key: NEST_SERVICE_EMAIL
+        sync: false
+      # Optional static JWT; not required if create-token mint works
+      - key: NEST_API_TOKEN
+        sync: false
+      - key: FEATHERLESS_API_KEY
+        sync: false
     disk:
       name: openclaw-data
       mountPath: /data

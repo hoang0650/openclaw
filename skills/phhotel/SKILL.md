@@ -6,10 +6,13 @@ metadata:
     requires:
       env:
         - NEST_BACKEND_URL
-        - NEST_API_TOKEN
     optionalEnv:
       - PHHOTEL_API_URL
+      - NEST_API_TOKEN
       - NEST_SERVICE_AUTH_SECRET
+      - NEST_SERVICE_USER_ID
+      - NEST_SERVICE_USERNAME
+      - NEST_SERVICE_EMAIL
       - PHHOTEL_HOTEL_ID
 ---
 
@@ -40,7 +43,7 @@ Aligned with:
 | ----------------- | ------------------------------------------------------------------------------------ |
 | API base          | `$PHHOTEL_API_URL` or `$NEST_BACKEND_URL` or `https://api.phhotel.vn`                |
 | OpenClaw host     | `https://openclaw.phhotel.vn`                                                        |
-| Hotel ops auth    | `Authorization: Bearer $NEST_API_TOKEN` (user JWT with hotel/room access)            |
+| Hotel ops auth    | `Authorization: Bearer <JWT>` — see **Auth bootstrap** below                         |
 | Usage plugin auth | `X-Service-Secret: $NEST_SERVICE_AUTH_SECRET` — **plugin only**, not for rooms/sepay |
 
 Session key (from hotelapp / PHGroup-AI openclaw admin) must be:
@@ -50,7 +53,34 @@ Session key (from hotelapp / PHGroup-AI openclaw admin) must be:
 
 so `phhotel-usage` can attribute OpenClaw tokens to the hotel quota.
 
-Collect only missing fields: `hotelId`, check-in/out, guests/rooms, guest name, guest phone. Do not re-ask known facts.
+Collect only missing fields: `hotelId` (Mongo ObjectId, **not** hotel display name), check-in/out, guests/rooms, guest name, guest phone. Do not re-ask known facts.
+
+**Never** ask the guest/operator to edit Render Environment Variables, add `NEST_API_TOKEN`, or act as system admin. If auth fails after bootstrap, say live booking is temporarily unavailable and suggest retry / contact hotel staff — keep the reply guest-facing.
+
+## Auth bootstrap (before any `/rooms` or `/sepay` call)
+
+Resolve a Bearer JWT in this order (same idea as PHGroup-AI `backend_auth_service`):
+
+1. If `$NEST_API_TOKEN` is set, use it.
+2. Else mint via Nest internal endpoint (needs `$NEST_SERVICE_AUTH_SECRET` **and** one of `$NEST_SERVICE_USER_ID` / `$NEST_SERVICE_USERNAME` / `$NEST_SERVICE_EMAIL`):
+
+```bash
+curl -sS "https://api.phhotel.vn/users/create-token" \
+  -H "X-Service-Secret: $NEST_SERVICE_AUTH_SECRET" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -d '{"userId":"<NEST_SERVICE_USER_ID>"}'
+```
+
+Use `username` or `email` in the JSON body instead of `userId` when those env vars are set. Read `token` from the JSON response and use it as:
+
+```bash
+Authorization: Bearer <token>
+```
+
+Cache that token for the rest of the conversation. On `401`/`403` from hotel APIs, mint once more (`force` = call create-token again) then retry once.
+
+If both static token and mint fail (missing secret/subject, or create-token 403/404): **stop** — do not invent rooms/prices; tell the guest that live verification is unavailable.
 
 ## Mandatory booking order
 
@@ -65,15 +95,16 @@ Never invent availability, room number, or price. Never create a booking before 
 
 ## API playbook
 
-Always send:
+Always send (after Auth bootstrap):
 
 ```bash
-Authorization: Bearer $NEST_API_TOKEN
+Authorization: Bearer <JWT>
 Accept: application/json
 Content-Type: application/json
 ```
 
 Base URL examples use `https://api.phhotel.vn` — substitute `$NEST_BACKEND_URL` when set.
+In the curl samples below, `$NEST_API_TOKEN` means the resolved JWT (env or minted).
 
 ### 1. Room types
 
@@ -218,4 +249,6 @@ Default Featherless model in PHGroup-AI: `deepseek-ai/DeepSeek-V4-Flash` (fallba
 - Never use fictional `POST /bookings` bodies (`roomTypeId` / `guestName` / `paymentStatus: "paid"`)
 - Never call `create-payment-history` without `userId` + `amount` (+ `roomId` for deposits)
 - Never call `priceConfig/calculate` with `roomTypeId` / guest counts — use `roomId` + `rateType`
-- Service secret alone cannot create bookings; hotel APIs need Bearer JWT
+- Service secret alone cannot create bookings; hotel APIs need Bearer JWT (static `NEST_API_TOKEN` or minted via `/users/create-token`)
+- Never instruct guests or chat operators to edit Render / OpenClaw admin env vars
+- Hotel display names (e.g. "Cường Phú") are not `hotelId` — need Mongo ObjectId from session key `hotel-<id>` or `$PHHOTEL_HOTEL_ID`
