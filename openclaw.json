@@ -15,10 +15,10 @@
       "allowedOrigins": [
         "https://openclaw.phhotel.vn",
         "https://openclaw-deu7.onrender.com",
-        "https://*.phhotel.vn",
-        "*"
+        "https://admin.phhotel.vn",
+        "https://phhotel.vn"
       ],
-      "dangerouslyAllowHostHeaderOriginFallback": true
+      "dangerouslyAllowHostHeaderOriginFallback": false
     }
   },
   "models": {
@@ -75,6 +75,9 @@
   "agents": {
     "defaults": {
       "model": "featherless/deepseek-ai/DeepSeek-V4-Flash",
+      "heartbeat": {
+        "every": "0m"
+      },
       "compaction": {
         "reserveTokensFloor": 20000
       },
@@ -93,6 +96,9 @@
         }
       }
     }
+  },
+  "cron": {
+    "enabled": false
   },
   "skills": {
     "entries": {
