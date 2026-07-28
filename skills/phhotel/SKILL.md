@@ -1,6 +1,6 @@
 ---
 name: phhotel
-description: Handles PHHotel room quotes, SePay deposit QR, payment confirmation, and booking closure. Invoke when users ask about availability, room rates, deposits, or booking via chat, fanpage, Zalo, or Telegram.
+description: Handles PHHotel room quotes, SePay deposit QR, payment confirmation, and booking closure inside OpenClaw automation. Invoke when users ask about availability, room rates, deposits, or booking via chat, fanpage, Zalo, or Telegram.
 metadata:
   openclaw:
     requires:
@@ -12,7 +12,7 @@ metadata:
 
 # PHHotel Sales Agent
 
-Use this skill for hotel sales conversations that need live PHHotel data:
+Use this skill for OpenClaw automation flows that need live PHHotel data:
 
 - checking vacant rooms
 - checking room types and room pricing
@@ -22,6 +22,7 @@ Use this skill for hotel sales conversations that need live PHHotel data:
 - closing sales from fanpage, Zalo OA, Telegram, or website live chat
 
 Do not use this skill for management-only requests such as revenue, payroll, internal reports, or shift handover data unless the user explicitly asks for those operational tasks.
+Do not assume PHGroup-AI `/chat` delegates here automatically; this skill is for explicit OpenClaw-side automation/runtime use.
 
 ## Runtime Inputs
 
