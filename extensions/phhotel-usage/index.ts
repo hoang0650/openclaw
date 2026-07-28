@@ -42,13 +42,53 @@ function asRecord(value: unknown): Record<string, unknown> {
 function readString(...values: unknown[]): string {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
-      return value.trim();
+      const expanded = expandEnvValue(value.trim());
+      if (expanded) {
+        return expanded;
+      }
+      continue;
     }
     if (typeof value === "number" && Number.isFinite(value)) {
       return String(value);
     }
   }
   return "";
+}
+
+/** Expand `${ENV_NAME}` placeholders from openclaw.json plugin config. */
+function expandEnvValue(value: string): string {
+  const trimmed = String(value || "").trim();
+  const exact = /^\$\{([A-Z0-9_]+)\}$/.exec(trimmed);
+  if (exact) {
+    return readEnv(exact[1]);
+  }
+  return trimmed.replace(/\$\{([A-Z0-9_]+)\}/g, (_m, name: string) => readEnv(name) || "");
+}
+
+function readUsageTokens(usage: unknown): { input: number; output: number } {
+  const u = asRecord(usage);
+  const input = Math.max(
+    0,
+    Math.floor(
+      Number(
+        u.input ?? u.input_tokens ?? u.inputTokens ?? u.prompt_tokens ?? u.promptTokens ?? 0,
+      ) || 0,
+    ),
+  );
+  const output = Math.max(
+    0,
+    Math.floor(
+      Number(
+        u.output ??
+          u.output_tokens ??
+          u.outputTokens ??
+          u.completion_tokens ??
+          u.completionTokens ??
+          0,
+      ) || 0,
+    ),
+  );
+  return { input, output };
 }
 
 /** Parse hotel-<id> / phhotel-<id> / nested agent:...:hotel-<id> / __u-<userId>. */
@@ -208,11 +248,18 @@ export default definePluginEntry({
         asRecord(ctx).sessionKey,
         asRecord(ctx).sessionId,
       );
-      const input = Math.max(0, Math.floor(Number(event?.usage?.input) || 0));
-      const output = Math.max(0, Math.floor(Number(event?.usage?.output) || 0));
-      const model = readString(event?.resolvedRef, event?.model);
+      const { input, output } = readUsageTokens(event?.usage);
+      const model = readString(event?.resolvedRef, event?.model, event?.provider);
       const hotelId = resolveHotelId(cfg, sessionId, ctx);
       const userId = resolveUserId(cfg, sessionId, ctx);
+      if (!hotelId) {
+        console.warn("[phhotel-usage] llm_output without hotelId", {
+          sessionId: sessionId || null,
+          runId,
+          input,
+          output,
+        });
+      }
 
       const current = pendingByRun.get(runId) || {
         input: 0,
