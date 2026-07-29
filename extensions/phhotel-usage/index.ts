@@ -284,9 +284,38 @@ async function checkHotelQuota(params: {
       remainingRaw === null || remainingRaw === undefined
         ? null
         : Math.max(0, Math.floor(Number(remainingRaw) || 0));
+    const packageQuota = Math.max(0, Math.floor(Number(usage.packageQuota) || 0));
+    const bonusQuota = Math.max(0, Math.floor(Number(usage.bonusQuota) || 0));
+    const effectiveQuota = Math.max(
+      0,
+      Math.floor(Number(data.effectiveQuota ?? usage.monthlyQuota) || packageQuota + bonusQuota),
+    );
+    const usedTurns = Math.max(0, Math.floor(Number(usage.usedTurns) || 0));
+    const hasBonusLeft =
+      bonusQuota > 0 && (remaining === null || remaining > 0 || usedTurns < effectiveQuota);
+
+    // Nest explicitly allows (package OR admin-allocated bonus without registered plan)
+    if (res.ok && (body.allowed === true || data.allowed === true)) {
+      const result = { allowed: true, reason: "", remaining };
+      quotaCache.set(cacheKey, { at: Date.now(), ...result });
+      return result;
+    }
+
+    // Soft-accept: usage payload shows allocated bonus still available even if shape odd
+    if (res.ok && hasBonusLeft && body.allowed !== false && data.allowed !== false) {
+      console.log(
+        `[phhotel-usage] quota ok via bonus hotel=${params.hotelId} bonus=${bonusQuota} remaining=${remaining ?? "n/a"}`,
+      );
+      const result = { allowed: true, reason: "", remaining };
+      quotaCache.set(cacheKey, { at: Date.now(), ...result });
+      return result;
+    }
 
     if (res.status === 429 || body.allowed === false || data.allowed === false) {
       const reason = readString(body.message, data.reason) || QUOTA_EXCEEDED_MESSAGE;
+      console.warn(
+        `[phhotel-usage] quota denied hotel=${params.hotelId} pkg=${packageQuota} bonus=${bonusQuota} used=${usedTurns} remaining=${remaining}`,
+      );
       const result = { allowed: false, reason, remaining: remaining ?? 0 };
       quotaCache.set(cacheKey, { at: Date.now(), ...result });
       return result;

@@ -4,7 +4,10 @@ Reports real LLM token usage from OpenClaw gateway to PHHotel AI quota (`channel
 
 # PHHotel Usage (OpenClaw plugin)
 
-1. **Quota gate** — `before_agent_run` gọi Nest `POST /ai-usage/internal/check`. Hết hạn ngạch → **không** gọi Featherless; trả lời mua thêm hạn ngạch.
+1. **Quota gate** — `before_agent_run` gọi Nest `POST /ai-usage/internal/check`.
+   - Được phép khi: gói có `packageQuota`, **hoặc** admin đã **phân bổ bonus** (`bonusQuota > 0`) dù KS chưa đăng ký gói AI (giống quyền dùng khi đã có hạn ngạch).
+   - Admin/superadmin: Nest bypass unlimited.
+   - Hết hạn ngạch → **không** gọi Featherless; trả lời mua thêm hạn ngạch.
 2. **Usage report** — `llm_output` + `agent_end` → `POST /ai-usage/internal/openclaw` (đồng bộ trang Hạn ngạch AI trên hotelapp).
 
 ## Flow
