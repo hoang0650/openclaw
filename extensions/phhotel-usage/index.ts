@@ -1,5 +1,8 @@
 /**
  * Report OpenClaw LLM token usage to phhotel-api AI quota (channel: openclaw).
+ *
+ * Requires plugins.entries.phhotel-usage.hooks.allowConversationAccess=true
+ * so llm_output / agent_end typed hooks are not blocked for non-bundled plugins.
  */
 import { definePluginEntry, type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 
@@ -10,6 +13,7 @@ type PendingUsage = {
   sessionId: string;
   hotelId: string;
   userId: string;
+  calls: number;
   timer?: ReturnType<typeof setTimeout>;
 };
 
@@ -75,6 +79,10 @@ function readUsageTokens(usage: unknown): { input: number; output: number } {
       ) || 0,
     ),
   );
+  const cacheRead = Math.max(
+    0,
+    Math.floor(Number(u.cacheRead ?? u.cache_read ?? u.cache_read_input_tokens ?? 0) || 0),
+  );
   const output = Math.max(
     0,
     Math.floor(
@@ -88,7 +96,8 @@ function readUsageTokens(usage: unknown): { input: number; output: number } {
       ) || 0,
     ),
   );
-  return { input, output };
+  // Featherless/OpenClaw: cache-read vẫn tính vào input billing khi prompt_tokens thiếu
+  return { input: input > 0 ? input : cacheRead, output };
 }
 
 /** Parse hotel-<id> / phhotel-<id> / nested agent:...:hotel-<id> / __u-<userId>. */
@@ -100,9 +109,11 @@ function parseIdsFromSession(sessionId: string): { hotelId: string; userId: stri
   const hotelMatch =
     /(?:^|[:/_-])(?:hotel|phhotel)[:_-]([a-f0-9]{24}|[a-z0-9-]{8,})(?:$|[:/_-])/i.exec(raw) ||
     /^(?:hotel|phhotel)[:_-]([a-f0-9]{24}|[a-z0-9-]{8,})$/i.exec(raw);
+  // Control UI đôi khi chỉ đưa ObjectId 24 hex trong session key
+  const bareObjectId = !hotelMatch && /^[a-f0-9]{24}$/i.test(raw) ? raw : null;
   const userMatch = /(?:__u-|user[:_-])([a-f0-9]{24})/i.exec(raw);
   return {
-    hotelId: hotelMatch?.[1] || "",
+    hotelId: hotelMatch?.[1] || bareObjectId || "",
     userId: userMatch?.[1] || "",
   };
 }
@@ -168,16 +179,21 @@ async function reportUsage(params: {
   outputTokens: number;
   model: string;
   turns: number;
+  calls: number;
 }): Promise<void> {
   if (!params.apiBaseUrl || !params.serviceSecret || !params.hotelId) {
     console.warn("[phhotel-usage] skip report: missing apiBaseUrl/serviceSecret/hotelId", {
       hasApi: !!params.apiBaseUrl,
       hasSecret: !!params.serviceSecret,
       hotelId: params.hotelId || null,
+      calls: params.calls,
+      in: params.inputTokens,
+      out: params.outputTokens,
     });
     return;
   }
-  if (params.inputTokens <= 0 && params.outputTokens <= 0) {
+  // Vẫn báo khi có LLM call (calls>0) dù token = 0 — Nest ghi measured, không ước lượng
+  if (params.calls <= 0 && params.inputTokens <= 0 && params.outputTokens <= 0) {
     return;
   }
 
@@ -198,6 +214,7 @@ async function reportUsage(params: {
         inputTokens: params.inputTokens,
         outputTokens: params.outputTokens,
         model: params.model || undefined,
+        allowEstimate: false,
       }),
     });
     if (!res.ok) {
@@ -206,17 +223,106 @@ async function reportUsage(params: {
       return;
     }
     console.log(
-      `[phhotel-usage] reported openclaw usage hotel=${params.hotelId} in=${params.inputTokens} out=${params.outputTokens} model=${params.model}`,
+      `[phhotel-usage] reported openclaw usage hotel=${params.hotelId} in=${params.inputTokens} out=${params.outputTokens} calls=${params.calls} model=${params.model}`,
     );
   } catch (err) {
     console.warn("[phhotel-usage] report error:", (err as Error)?.message || err);
   }
 }
 
+const QUOTA_CACHE_TTL_MS = 8_000;
+const quotaCache = new Map<
+  string,
+  { at: number; allowed: boolean; reason: string; remaining: number | null }
+>();
+
+const QUOTA_EXCEEDED_MESSAGE =
+  "Đã hết hạn ngạch AI tháng này. Model sẽ không gọi Featherless cho đến khi bạn mua thêm hạn ngạch hoặc nâng cấp gói. Vui lòng vào trang Hạn ngạch AI / Gói giá trên admin.phhotel.vn, hoặc liên hệ quản trị viên PHHotel để được cấp thêm.";
+
+const MISSING_HOTEL_MESSAGE =
+  'Không xác định được khách sạn để trừ hạn ngạch AI. Vui lòng mở OpenClaw từ nút "Mở OpenClaw" trong AI Chatbox (session hotel-<id>), không dùng phiên main.';
+
+async function checkHotelQuota(params: {
+  apiBaseUrl: string;
+  serviceSecret: string;
+  hotelId: string;
+  userId: string;
+}): Promise<{ allowed: boolean; reason: string; remaining: number | null }> {
+  const cacheKey = `${params.hotelId}:${params.userId || "-"}`;
+  const cached = quotaCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < QUOTA_CACHE_TTL_MS) {
+    return { allowed: cached.allowed, reason: cached.reason, remaining: cached.remaining };
+  }
+
+  if (!params.apiBaseUrl || !params.serviceSecret || !params.hotelId) {
+    return {
+      allowed: false,
+      reason: MISSING_HOTEL_MESSAGE,
+      remaining: null,
+    };
+  }
+
+  const url = `${params.apiBaseUrl}/ai-usage/internal/check`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Service-Secret": params.serviceSecret,
+      },
+      body: JSON.stringify({
+        hotelId: params.hotelId,
+        userId: params.userId || undefined,
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const data = asRecord(body.data);
+    const usage = asRecord(data.usage);
+    const remainingRaw = usage.remainingTurns;
+    const remaining =
+      remainingRaw === null || remainingRaw === undefined
+        ? null
+        : Math.max(0, Math.floor(Number(remainingRaw) || 0));
+
+    if (res.status === 429 || body.allowed === false || data.allowed === false) {
+      const reason = readString(body.message, data.reason) || QUOTA_EXCEEDED_MESSAGE;
+      const result = { allowed: false, reason, remaining: remaining ?? 0 };
+      quotaCache.set(cacheKey, { at: Date.now(), ...result });
+      return result;
+    }
+
+    if (!res.ok) {
+      console.warn(
+        `[phhotel-usage] quota check HTTP ${res.status}: ${String(body.message || "").slice(0, 200)}`,
+      );
+      // Fail-closed: không gọi Featherless khi không xác minh được hạn ngạch
+      return {
+        allowed: false,
+        reason:
+          "Không kiểm tra được hạn ngạch AI lúc này. Vui lòng thử lại sau hoặc mở trang Hạn ngạch AI trên admin.phhotel.vn.",
+        remaining: null,
+      };
+    }
+
+    const result = { allowed: true, reason: "", remaining };
+    quotaCache.set(cacheKey, { at: Date.now(), ...result });
+    return result;
+  } catch (err) {
+    console.warn("[phhotel-usage] quota check error:", (err as Error)?.message || err);
+    return {
+      allowed: false,
+      reason:
+        "Không kết nối được máy chủ hạn ngạch AI. Vui lòng thử lại sau — chưa gọi Featherless.",
+      remaining: null,
+    };
+  }
+}
+
 export default definePluginEntry({
   id: "phhotel-usage",
   name: "PHHotel AI Usage",
-  description: "Report OpenClaw LLM token usage to PHHotel AI quota (channel openclaw).",
+  description: "Enforce PHHotel AI quota before Featherless calls and report OpenClaw token usage.",
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig || {}) as PluginConfig;
     const apiBaseUrl = resolveApiBase(cfg);
@@ -229,6 +335,8 @@ export default definePluginEntry({
         clearTimeout(bag.timer);
       }
       pendingByRun.delete(runId);
+      // Invalidate quota cache after a billed turn
+      quotaCache.clear();
       await reportUsage({
         apiBaseUrl,
         serviceSecret,
@@ -238,14 +346,62 @@ export default definePluginEntry({
         outputTokens: bag.output,
         model: bag.model,
         turns: 1,
+        calls: bag.calls,
       });
     };
+
+    // Gate: chặn trước khi agent gọi Featherless nếu hết hạn ngạch (đồng bộ hotelapp AI Usage)
+    api.on("before_agent_run", async (_event: any, ctx: any) => {
+      const sessionId = readString(asRecord(ctx).sessionKey, asRecord(ctx).sessionId);
+      const hotelId = resolveHotelId(cfg, sessionId, ctx);
+      const userId = resolveUserId(cfg, sessionId, ctx);
+
+      if (!hotelId) {
+        console.warn("[phhotel-usage] before_agent_run blocked: missing hotelId", {
+          sessionId: sessionId || null,
+        });
+        return {
+          outcome: "block" as const,
+          reason: "missing_hotel_id",
+          category: "cost_limit",
+          message: MISSING_HOTEL_MESSAGE,
+        };
+      }
+
+      const check = await checkHotelQuota({
+        apiBaseUrl,
+        serviceSecret,
+        hotelId,
+        userId,
+      });
+
+      if (!check.allowed) {
+        console.warn(
+          `[phhotel-usage] quota exceeded hotel=${hotelId} remaining=${check.remaining}`,
+        );
+        return {
+          outcome: "block" as const,
+          reason: "ai_quota_exceeded",
+          category: "cost_limit",
+          message: check.reason || QUOTA_EXCEEDED_MESSAGE,
+          metadata: {
+            hotelId,
+            remainingTurns: check.remaining,
+          },
+        };
+      }
+
+      console.log(
+        `[phhotel-usage] quota ok hotel=${hotelId} remaining=${check.remaining ?? "unlimited"}`,
+      );
+      return { outcome: "pass" as const };
+    });
 
     api.on("llm_output", async (event: any, ctx: any) => {
       const runId = readString(event?.runId) || `anon-${Date.now()}`;
       const sessionId = readString(
-        event?.sessionId,
         asRecord(ctx).sessionKey,
+        event?.sessionId,
         asRecord(ctx).sessionId,
       );
       const { input, output } = readUsageTokens(event?.usage);
@@ -253,13 +409,19 @@ export default definePluginEntry({
       const hotelId = resolveHotelId(cfg, sessionId, ctx);
       const userId = resolveUserId(cfg, sessionId, ctx);
       if (!hotelId) {
-        console.warn("[phhotel-usage] llm_output without hotelId", {
-          sessionId: sessionId || null,
-          runId,
-          input,
-          output,
-        });
+        console.warn(
+          "[phhotel-usage] llm_output without hotelId — set session=hotel-<id> or PHHOTEL_HOTEL_ID",
+          {
+            sessionId: sessionId || null,
+            runId,
+            input,
+            output,
+          },
+        );
       }
+      console.log(
+        `[phhotel-usage] llm_output run=${runId} hotel=${hotelId || "-"} in=${input} out=${output} model=${model || "-"}`,
+      );
 
       const current = pendingByRun.get(runId) || {
         input: 0,
@@ -268,9 +430,11 @@ export default definePluginEntry({
         sessionId: "",
         hotelId: "",
         userId: "",
+        calls: 0,
       };
       current.input += input;
       current.output += output;
+      current.calls += 1;
       current.model = model || current.model;
       current.sessionId = sessionId || current.sessionId;
       current.hotelId = hotelId || current.hotelId;
@@ -278,7 +442,6 @@ export default definePluginEntry({
       if (current.timer) {
         clearTimeout(current.timer);
       }
-      // Fallback nếu agent_end không fire (timeout / abort)
       current.timer = setTimeout(() => {
         void flushRun(runId, ctx);
       }, FLUSH_FALLBACK_MS);
@@ -292,7 +455,7 @@ export default definePluginEntry({
     });
 
     api.logger?.info?.(
-      `phhotel-usage ready api=${apiBaseUrl || "(missing)"} secret=${serviceSecret ? "set" : "missing"}`,
+      `phhotel-usage ready api=${apiBaseUrl || "(missing)"} secret=${serviceSecret ? "set" : "missing"} hooks=before_agent_run+llm_output+agent_end`,
     );
   },
 });

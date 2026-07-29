@@ -114,6 +114,9 @@
       },
       "phhotel-usage": {
         "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           "apiBaseUrl": "${PHHOTEL_API_URL}",
           "serviceSecret": "${NEST_SERVICE_AUTH_SECRET}"

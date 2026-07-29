@@ -59,10 +59,20 @@ Collect only missing fields: `hotelId` (Mongo ObjectId, **not** hotel display na
 
 ## Auth bootstrap (before any `/rooms` or `/sepay` call)
 
-Resolve a Bearer JWT in this order (same idea as PHGroup-AI `backend_auth_service`):
+**Do not** tell users to add `NEST_API_TOKEN` on Render. Mint a JWT in-process:
 
-1. If `$NEST_API_TOKEN` is set, use it.
-2. Else mint via Nest internal endpoint (needs `$NEST_SERVICE_AUTH_SECRET` **and** one of `$NEST_SERVICE_USER_ID` / `$NEST_SERVICE_USERNAME` / `$NEST_SERVICE_EMAIL`):
+```bash
+JWT="$(bash skills/phhotel/scripts/mint-nest-jwt.sh)"
+# then:
+#   -H "Authorization: Bearer $JWT"
+```
+
+What the script does (same as PHGroup-AI `backend_auth_service`):
+
+1. If `$NEST_API_TOKEN` is set **and** `/users/verify-token` says valid → use it.
+2. Else `POST /users/create-token` with `X-Service-Secret: $NEST_SERVICE_AUTH_SECRET` and body using `$NEST_SERVICE_USER_ID` **or** `$NEST_SERVICE_USERNAME` **or** `$NEST_SERVICE_EMAIL`.
+
+Manual equivalent:
 
 ```bash
 curl -sS "https://api.phhotel.vn/users/create-token" \
@@ -72,15 +82,11 @@ curl -sS "https://api.phhotel.vn/users/create-token" \
   -d '{"userId":"<NEST_SERVICE_USER_ID>"}'
 ```
 
-Use `username` or `email` in the JSON body instead of `userId` when those env vars are set. Read `token` from the JSON response and use it as:
+Cache `$JWT` for the rest of the conversation. On Nest `401`/`403`, mint once more then retry once.
 
-```bash
-Authorization: Bearer <token>
-```
+If mint fails (missing secret/subject, or create-token 403/404): **stop** — do not invent rooms/prices; tell the guest that live verification is temporarily unavailable. **Never** ask them to edit Environment Variables.
 
-Cache that token for the rest of the conversation. On `401`/`403` from hotel APIs, mint once more (`force` = call create-token again) then retry once.
-
-If both static token and mint fail (missing secret/subject, or create-token 403/404): **stop** — do not invent rooms/prices; tell the guest that live verification is unavailable.
+In curl samples below, `$JWT` is that minted Bearer token (not a Render env the guest must set).
 
 ## Mandatory booking order
 
@@ -104,34 +110,34 @@ Content-Type: application/json
 ```
 
 Base URL examples use `https://api.phhotel.vn` — substitute `$NEST_BACKEND_URL` when set.
-In the curl samples below, `$NEST_API_TOKEN` means the resolved JWT (env or minted).
+Always mint first: `JWT="$(bash skills/phhotel/scripts/mint-nest-jwt.sh)"`.
 
 ### 1. Room types
 
 ```bash
 curl -sS "https://api.phhotel.vn/room-categories?hotelId=<HOTEL_ID>" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" -H "Accept: application/json"
+  -H "Authorization: Bearer $JWT" -H "Accept: application/json"
 ```
 
 Fallback:
 
 ```bash
 curl -sS "https://api.phhotel.vn/rooms/room-types?hotelId=<HOTEL_ID>" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" -H "Accept: application/json"
+  -H "Authorization: Bearer $JWT" -H "Accept: application/json"
 ```
 
 ### 2. Vacant rooms
 
 ```bash
 curl -sS "https://api.phhotel.vn/rooms/available?hotelId=<HOTEL_ID>&checkInDate=<YYYY-MM-DD>&checkOutDate=<YYYY-MM-DD>" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" -H "Accept: application/json"
+  -H "Authorization: Bearer $JWT" -H "Accept: application/json"
 ```
 
 Quick snapshot (not date-aware):
 
 ```bash
 curl -sS "https://api.phhotel.vn/rooms?hotelId=<HOTEL_ID>&lite=1" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" -H "Accept: application/json"
+  -H "Authorization: Bearer $JWT" -H "Accept: application/json"
 ```
 
 ### 3. Pricing
@@ -140,14 +146,14 @@ By room type:
 
 ```bash
 curl -sS "https://api.phhotel.vn/priceConfig/hotel/<HOTEL_ID>/roomType/<ROOM_TYPE_ID>" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" -H "Accept: application/json"
+  -H "Authorization: Bearer $JWT" -H "Accept: application/json"
 ```
 
 Calculate for a **specific room** (body must use `roomId` + `rateType`, not guest counts):
 
 ```bash
 curl -sS "https://api.phhotel.vn/priceConfig/calculate" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" \
+  -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
   -d '{
     "roomId":"<ROOM_ID>",
@@ -165,7 +171,7 @@ Requires Nest **user** ObjectId (`userId` = authenticated hotel/staff account fr
 
 ```bash
 curl -sS "https://api.phhotel.vn/sepay/create-payment-history" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" \
+  -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
   -d '{
     "userId":"<NEST_USER_OBJECT_ID>",
@@ -191,7 +197,7 @@ Return QR / transfer content exactly. Settlement is finalized by SePay webhook; 
 
 ```bash
 curl -sS "https://api.phhotel.vn/sepay/payment-status?hotelId=<HOTEL_ID>&paymentCode=<PAYMENT_CODE>&paymentType=booking_deposit" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" -H "Accept: application/json"
+  -H "Authorization: Bearer $JWT" -H "Accept: application/json"
 ```
 
 Optional: `paymentHistoryId`, `roomId`. Proceed only when `completed === true` or `status === "completed"`.
@@ -202,7 +208,7 @@ Use **`POST /rooms/booking`** (not `POST /bookings`). Deposit must already be co
 
 ```bash
 curl -sS "https://api.phhotel.vn/rooms/booking" \
-  -H "Authorization: Bearer $NEST_API_TOKEN" \
+  -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
   -d '{
     "hotelId":"<HOTEL_ID>",
@@ -249,6 +255,6 @@ Default Featherless model in PHGroup-AI: `deepseek-ai/DeepSeek-V4-Flash` (fallba
 - Never use fictional `POST /bookings` bodies (`roomTypeId` / `guestName` / `paymentStatus: "paid"`)
 - Never call `create-payment-history` without `userId` + `amount` (+ `roomId` for deposits)
 - Never call `priceConfig/calculate` with `roomTypeId` / guest counts — use `roomId` + `rateType`
-- Service secret alone cannot create bookings; hotel APIs need Bearer JWT (static `NEST_API_TOKEN` or minted via `/users/create-token`)
+- Service secret alone cannot create bookings; hotel APIs need Bearer JWT from `skills/phhotel/scripts/mint-nest-jwt.sh` (or valid `$NEST_API_TOKEN` already on gateway)
 - Never instruct guests or chat operators to edit Render / OpenClaw admin env vars
 - Hotel display names (e.g. "Cường Phú") are not `hotelId` — need Mongo ObjectId from session key `hotel-<id>` or `$PHHOTEL_HOTEL_ID`

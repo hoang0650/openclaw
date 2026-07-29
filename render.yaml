@@ -31,6 +31,9 @@ services:
         sync: false
       - key: NEST_SERVICE_EMAIL
         sync: false
+      # Fallback hotel id when Control UI session is not hotel-<id>
+      - key: PHHOTEL_HOTEL_ID
+        sync: false
       # Optional static JWT; not required if create-token mint works
       - key: NEST_API_TOKEN
         sync: false

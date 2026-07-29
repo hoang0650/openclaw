@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/phhotel-usage",
-  "version": "2026.7.2",
+  "version": "2026.7.29",
   "private": true,
   "description": "Report OpenClaw LLM usage to PHHotel AI quota",
   "type": "module",
