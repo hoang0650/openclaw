@@ -12,17 +12,21 @@ Reports real LLM token usage from OpenClaw gateway to PHHotel AI quota (`channel
 
 ## Flow
 
-1. Control UI mở với `session=hotel-<hotelId>__u-<userId>`
-2. Mỗi tin nhắn: check quota → nếu OK mới chạy model
-3. Sau khi model trả lời: báo token thật về Nest (`channel: openclaw`)
+1. Control UI mở tại `https://{tenantId}.phhotel.vn` (`tenantId` = `hotelId`) hoặc hash `#hotelId=…&session=hotel-…`.
+2. Control UI buộc session `hotel-<tenantId>` (kể cả khi URL đang `main`) và nhớ context trong localStorage.
+3. Mỗi tin nhắn: check quota → nếu OK mới chạy model
+4. Sau khi model trả lời: báo token thật về Nest (`channel: openclaw`)
 
 ## Env (gateway)
 
-| Variable                            | Purpose                                         |
-| ----------------------------------- | ----------------------------------------------- |
-| `PHHOTEL_API_URL` or `NEST_API_URL` | API base (default `https://api.phhotel.vn`)     |
-| `NEST_SERVICE_AUTH_SECRET`          | Same secret as phhotel-api                      |
-| `PHHOTEL_HOTEL_ID`                  | Fallback hotel id if session is not `hotel-...` |
+| Variable                            | Purpose                                          |
+| ----------------------------------- | ------------------------------------------------ |
+| `PHHOTEL_API_URL` or `NEST_API_URL` | API base (default `https://api.phhotel.vn`)      |
+| `NEST_SERVICE_AUTH_SECRET`          | Same secret as phhotel-api                       |
+| `PHHOTEL_HOTEL_ID`                  | Fallback hotel id if session/domain thiếu        |
+| `OPENCLAW_GATEWAY_URL` / `HOST`     | Nếu `{24hex}.phhotel.vn` → `hotelId` = subdomain |
+
+`hotelId` = `tenantId` trên domain (vd [`69d73f54e5302e4f720b66af.phhotel.vn`](https://69d73f54e5302e4f720b66af.phhotel.vn/)) — **không** phải `userId`.
 
 ## Enable
 

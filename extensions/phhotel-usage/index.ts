@@ -111,11 +111,49 @@ function parseIdsFromSession(sessionId: string): { hotelId: string; userId: stri
     /^(?:hotel|phhotel)[:_-]([a-f0-9]{24}|[a-z0-9-]{8,})$/i.exec(raw);
   // Control UI đôi khi chỉ đưa ObjectId 24 hex trong session key
   const bareObjectId = !hotelMatch && /^[a-f0-9]{24}$/i.test(raw) ? raw : null;
+  // agent:main:<24hex> (một số tenant dùng ObjectId làm session leaf)
+  const leafObjectId =
+    !hotelMatch && !bareObjectId
+      ? /^agent:[^:]+:([a-f0-9]{24})(?:$|[:/_-])/i.exec(raw)?.[1] || null
+      : null;
   const userMatch = /(?:__u-|user[:_-])([a-f0-9]{24})/i.exec(raw);
   return {
-    hotelId: hotelMatch?.[1] || bareObjectId || "",
+    hotelId: hotelMatch?.[1] || bareObjectId || leafObjectId || "",
     userId: userMatch?.[1] || "",
   };
+}
+
+/** Hostname dạng {tenantId}.phhotel.vn → hotelId (tenantId === hotelId, không phải userId). */
+function parseHotelIdFromHost(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const host = (
+      raw.includes("://") ? new URL(raw).hostname : raw.split("/")[0]?.split(":")[0] || ""
+    ).toLowerCase();
+    const m = /^([a-f0-9]{24})\.phhotel\.vn$/.exec(host);
+    return m?.[1] || "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveHotelIdFromEnvHosts(): string {
+  const candidates = [
+    readEnv("OPENCLAW_GATEWAY_URL"),
+    readEnv("OPENCLAW_PUBLIC_URL"),
+    readEnv("PUBLIC_GATEWAY_URL"),
+    readEnv("GATEWAY_URL"),
+    readEnv("OPENCLAW_GATEWAY_HOST"),
+    readEnv("PHHOTEL_GATEWAY_HOST"),
+    readEnv("RENDER_EXTERNAL_HOSTNAME"),
+    readEnv("HOST"),
+  ];
+  for (const c of candidates) {
+    const id = parseHotelIdFromHost(c);
+    if (id) return id;
+  }
+  return "";
 }
 
 function resolveHotelId(cfg: PluginConfig, sessionId: string, ctx: unknown): string {
@@ -124,12 +162,20 @@ function resolveHotelId(cfg: PluginConfig, sessionId: string, ctx: unknown): str
   const fromCtxSession = parseIdsFromSession(
     readString(ctxObj.sessionKey, ctxObj.sessionId),
   ).hotelId;
+  const fromWorkspace = parseIdsFromSession(readString(ctxObj.workspaceDir)).hotelId;
+  // tenantId trên domain gateway / wss URL (vd 69d73f54e5302e4f720b66af.phhotel.vn)
+  const fromHost = parseHotelIdFromHost(
+    readString(ctxObj.gatewayUrl, ctxObj.host, ctxObj.hostname, ctxObj.publicUrl, ctxObj.origin),
+  );
   return (
     fromSession ||
     fromCtxSession ||
+    fromWorkspace ||
+    fromHost ||
     readString(cfg.hotelId) ||
     readString(readEnv("PHHOTEL_HOTEL_ID"), readEnv("OPENCLAW_HOTEL_ID")) ||
     readString(ctxObj.hotelId, ctxObj.tenantId) ||
+    resolveHotelIdFromEnvHosts() ||
     ""
   );
 }
@@ -181,11 +227,12 @@ async function reportUsage(params: {
   turns: number;
   calls: number;
 }): Promise<void> {
-  if (!params.apiBaseUrl || !params.serviceSecret || !params.hotelId) {
+  if (!params.apiBaseUrl || !params.serviceSecret || (!params.hotelId && !params.userId)) {
     console.warn("[phhotel-usage] skip report: missing apiBaseUrl/serviceSecret/hotelId", {
       hasApi: !!params.apiBaseUrl,
       hasSecret: !!params.serviceSecret,
       hotelId: params.hotelId || null,
+      userId: params.userId || null,
       calls: params.calls,
       in: params.inputTokens,
       out: params.outputTokens,
@@ -247,14 +294,14 @@ async function checkHotelQuota(params: {
   serviceSecret: string;
   hotelId: string;
   userId: string;
-}): Promise<{ allowed: boolean; reason: string; remaining: number | null }> {
-  const cacheKey = `${params.hotelId}:${params.userId || "-"}`;
+}): Promise<{ allowed: boolean; reason: string; remaining: number | null; hotelId?: string }> {
+  const cacheKey = `${params.hotelId || "-"}:${params.userId || "-"}`;
   const cached = quotaCache.get(cacheKey);
   if (cached && Date.now() - cached.at < QUOTA_CACHE_TTL_MS) {
     return { allowed: cached.allowed, reason: cached.reason, remaining: cached.remaining };
   }
 
-  if (!params.apiBaseUrl || !params.serviceSecret || !params.hotelId) {
+  if (!params.apiBaseUrl || !params.serviceSecret || (!params.hotelId && !params.userId)) {
     return {
       allowed: false,
       reason: MISSING_HOTEL_MESSAGE,
@@ -272,12 +319,13 @@ async function checkHotelQuota(params: {
         "X-Service-Secret": params.serviceSecret,
       },
       body: JSON.stringify({
-        hotelId: params.hotelId,
+        hotelId: params.hotelId || undefined,
         userId: params.userId || undefined,
       }),
     });
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     const data = asRecord(body.data);
+    const resolvedHotelId = readString(data.hotelId, body.hotelId, params.hotelId);
     const usage = asRecord(data.usage);
     const remainingRaw = usage.remainingTurns;
     const remaining =
@@ -296,28 +344,38 @@ async function checkHotelQuota(params: {
 
     // Nest explicitly allows (package OR admin-allocated bonus without registered plan)
     if (res.ok && (body.allowed === true || data.allowed === true)) {
-      const result = { allowed: true, reason: "", remaining };
-      quotaCache.set(cacheKey, { at: Date.now(), ...result });
+      const result = { allowed: true, reason: "", remaining, hotelId: resolvedHotelId };
+      quotaCache.set(cacheKey, { at: Date.now(), allowed: true, reason: "", remaining });
       return result;
     }
 
     // Soft-accept: usage payload shows allocated bonus still available even if shape odd
     if (res.ok && hasBonusLeft && body.allowed !== false && data.allowed !== false) {
       console.log(
-        `[phhotel-usage] quota ok via bonus hotel=${params.hotelId} bonus=${bonusQuota} remaining=${remaining ?? "n/a"}`,
+        `[phhotel-usage] quota ok via bonus hotel=${resolvedHotelId || params.hotelId} bonus=${bonusQuota} remaining=${remaining ?? "n/a"}`,
       );
-      const result = { allowed: true, reason: "", remaining };
-      quotaCache.set(cacheKey, { at: Date.now(), ...result });
+      const result = { allowed: true, reason: "", remaining, hotelId: resolvedHotelId };
+      quotaCache.set(cacheKey, { at: Date.now(), allowed: true, reason: "", remaining });
       return result;
     }
 
     if (res.status === 429 || body.allowed === false || data.allowed === false) {
       const reason = readString(body.message, data.reason) || QUOTA_EXCEEDED_MESSAGE;
       console.warn(
-        `[phhotel-usage] quota denied hotel=${params.hotelId} pkg=${packageQuota} bonus=${bonusQuota} used=${usedTurns} remaining=${remaining}`,
+        `[phhotel-usage] quota denied hotel=${resolvedHotelId || params.hotelId} pkg=${packageQuota} bonus=${bonusQuota} used=${usedTurns} remaining=${remaining}`,
       );
-      const result = { allowed: false, reason, remaining: remaining ?? 0 };
-      quotaCache.set(cacheKey, { at: Date.now(), ...result });
+      const result = {
+        allowed: false,
+        reason,
+        remaining: remaining ?? 0,
+        hotelId: resolvedHotelId,
+      };
+      quotaCache.set(cacheKey, {
+        at: Date.now(),
+        allowed: false,
+        reason,
+        remaining: remaining ?? 0,
+      });
       return result;
     }
 
@@ -334,8 +392,8 @@ async function checkHotelQuota(params: {
       };
     }
 
-    const result = { allowed: true, reason: "", remaining };
-    quotaCache.set(cacheKey, { at: Date.now(), ...result });
+    const result = { allowed: true, reason: "", remaining, hotelId: resolvedHotelId };
+    quotaCache.set(cacheKey, { at: Date.now(), allowed: true, reason: "", remaining });
     return result;
   } catch (err) {
     console.warn("[phhotel-usage] quota check error:", (err as Error)?.message || err);
@@ -382,10 +440,10 @@ export default definePluginEntry({
     // Gate: chặn trước khi agent gọi Featherless nếu hết hạn ngạch (đồng bộ hotelapp AI Usage)
     api.on("before_agent_run", async (_event: any, ctx: any) => {
       const sessionId = readString(asRecord(ctx).sessionKey, asRecord(ctx).sessionId);
-      const hotelId = resolveHotelId(cfg, sessionId, ctx);
+      let hotelId = resolveHotelId(cfg, sessionId, ctx);
       const userId = resolveUserId(cfg, sessionId, ctx);
 
-      if (!hotelId) {
+      if (!hotelId && !userId) {
         console.warn("[phhotel-usage] before_agent_run blocked: missing hotelId", {
           sessionId: sessionId || null,
         });
@@ -404,19 +462,36 @@ export default definePluginEntry({
         userId,
       });
 
+      if (check.hotelId && !hotelId) {
+        hotelId = check.hotelId;
+      }
+
       if (!check.allowed) {
         console.warn(
-          `[phhotel-usage] quota exceeded hotel=${hotelId} remaining=${check.remaining}`,
+          `[phhotel-usage] quota exceeded hotel=${hotelId || "-"} remaining=${check.remaining}`,
         );
         return {
           outcome: "block" as const,
-          reason: "ai_quota_exceeded",
+          reason: hotelId || userId ? "ai_quota_exceeded" : "missing_hotel_id",
           category: "cost_limit",
           message: check.reason || QUOTA_EXCEEDED_MESSAGE,
           metadata: {
-            hotelId,
+            hotelId: hotelId || undefined,
             remainingTurns: check.remaining,
           },
+        };
+      }
+
+      if (!hotelId) {
+        console.warn("[phhotel-usage] before_agent_run blocked: Nest did not resolve hotelId", {
+          sessionId: sessionId || null,
+          userId: userId || null,
+        });
+        return {
+          outcome: "block" as const,
+          reason: "missing_hotel_id",
+          category: "cost_limit",
+          message: MISSING_HOTEL_MESSAGE,
         };
       }
 

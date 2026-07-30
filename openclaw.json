@@ -61,12 +61,116 @@
         "api": "openai-completions",
         "models": [
           {
+            "id": "openrouter/free",
+            "name": "OpenRouter Free Models Router",
+            "input": ["text", "image"],
+            "reasoning": true,
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
             "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
-            "name": "OpenRouter Nemotron 3 (emergency free fallback)",
+            "name": "NVIDIA Nemotron 3 Ultra",
             "input": ["text"],
             "reasoning": true,
-            "contextWindow": 32768,
-            "maxTokens": 4096
+            "contextWindow": 1000000,
+            "maxTokens": 16384
+          },
+          {
+            "id": "nvidia/nemotron-3-super-120b-a12b:free",
+            "name": "NVIDIA Nemotron 3 Super",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 262144,
+            "maxTokens": 16384
+          },
+          {
+            "id": "nvidia/nemotron-3-nano-30b-a3b:free",
+            "name": "NVIDIA Nemotron 3 Nano 30B-A3B",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 256000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "nvidia/nemotron-nano-9b-v2:free",
+            "name": "NVIDIA Nemotron Nano 9B V2",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 128000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+            "name": "NVIDIA Nemotron 3 Nano Omni",
+            "input": ["text", "image", "audio", "video"],
+            "reasoning": true,
+            "contextWindow": 256000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "nvidia/nemotron-nano-12b-v2-vl:free",
+            "name": "NVIDIA Nemotron Nano 12B V2 VL",
+            "input": ["text", "image", "video"],
+            "reasoning": true,
+            "contextWindow": 128000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "inclusionai/ling-3.0-flash:free",
+            "name": "Ling 3.0 Flash",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 262144,
+            "maxTokens": 8192
+          },
+          {
+            "id": "cohere/north-mini-code:free",
+            "name": "Cohere North Mini Code",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 256000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "poolside/laguna-s-2.1:free",
+            "name": "Poolside Laguna S 2.1",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 262144,
+            "maxTokens": 8192
+          },
+          {
+            "id": "poolside/laguna-xs-2.1:free",
+            "name": "Poolside Laguna XS 2.1",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 262144,
+            "maxTokens": 8192
+          },
+          {
+            "id": "google/gemma-4-26b-a4b-it:free",
+            "name": "Google Gemma 4 26B A4B",
+            "input": ["text", "image", "video"],
+            "reasoning": true,
+            "contextWindow": 262144,
+            "maxTokens": 8192
+          },
+          {
+            "id": "google/gemma-4-31b-it:free",
+            "name": "Google Gemma 4 31B",
+            "input": ["text", "image", "video"],
+            "reasoning": true,
+            "contextWindow": 262144,
+            "maxTokens": 8192
+          },
+          {
+            "id": "openai/gpt-oss-20b:free",
+            "name": "OpenAI gpt-oss-20b",
+            "input": ["text"],
+            "reasoning": true,
+            "contextWindow": 131072,
+            "maxTokens": 8192
           }
         ]
       }
@@ -91,8 +195,23 @@
         "featherless/MiniMaxAI/MiniMax-M2.5": {
           "alias": "phhotel-premium"
         },
-        "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
+        "openrouter/openrouter/free": {
           "alias": "phhotel-openrouter"
+        },
+        "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
+          "alias": "phhotel-or-nemotron-ultra"
+        },
+        "openrouter/nvidia/nemotron-3-super-120b-a12b:free": {
+          "alias": "phhotel-or-nemotron-super"
+        },
+        "openrouter/inclusionai/ling-3.0-flash:free": {
+          "alias": "phhotel-or-ling"
+        },
+        "openrouter/openai/gpt-oss-20b:free": {
+          "alias": "phhotel-or-gpt-oss"
+        },
+        "openrouter/google/gemma-4-31b-it:free": {
+          "alias": "phhotel-or-gemma"
         }
       }
     }

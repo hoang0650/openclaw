@@ -48,6 +48,33 @@ function decodeConfigPayload(raw: string | null): Record<string, unknown> | null
   }
 }
 
+/**
+ * PHHotel gateway host: https://{tenantId}.phhotel.vn
+ * tenantId === hotelId (Mongo ObjectId 24 hex) — KHÔNG phải userId.
+ */
+export function parsePhhotelTenantHotelId(
+  ...values: Array<string | null | undefined>
+): string | undefined {
+  for (const value of values) {
+    const raw = normalizeOptionalString(value);
+    if (!raw) {
+      continue;
+    }
+    try {
+      const host = raw.includes("://")
+        ? new URL(raw).hostname
+        : raw.split("/")[0]?.split(":")[0] || "";
+      const fromSubdomain = /^([a-f0-9]{24})\.phhotel\.vn$/i.exec(host);
+      if (fromSubdomain) {
+        return fromSubdomain[1].toLowerCase();
+      }
+    } catch {
+      // ignore invalid URL
+    }
+  }
+  return undefined;
+}
+
 function readParam(
   params: URLSearchParams,
   hashParams: URLSearchParams,
@@ -182,11 +209,37 @@ export function resolveApplicationStartupSettings(
   const hasBootstrapTokenParam = hashParams.has("bootstrapToken");
   const bootstrapToken = normalizeOptionalString(hashParams.get("bootstrapToken"));
   const session = normalizeOptionalString(params.get("session") ?? hashParams.get("session"));
+  const hotelIdParam = normalizeOptionalString(
+    params.get("hotelId") ??
+      hashParams.get("hotelId") ??
+      params.get("hotel_id") ??
+      hashParams.get("hotel_id") ??
+      params.get("tenant_id") ??
+      hashParams.get("tenant_id") ??
+      params.get("tenantId") ??
+      hashParams.get("tenantId"),
+  );
+  const userIdParam = normalizeOptionalString(
+    params.get("userId") ??
+      hashParams.get("userId") ??
+      params.get("user_id") ??
+      hashParams.get("user_id"),
+  );
+  // hotelId = tenantId trên subdomain gateway, vd https://69d73f54e5302e4f720b66af.phhotel.vn/
+  const hotelIdFromDomain = parsePhhotelTenantHotelId(
+    globalThis.location?.hostname,
+    nextGatewayUrl,
+    gatewayUrlRaw,
+    settings.gatewayUrl,
+  );
+  const hotelIdHint = hotelIdParam || hotelIdFromDomain;
   const autoConnectParam = readParam(params, hashParams, "autoConnect", "autoApprove");
   if (autoConnectParam && ["1", "true", "yes"].includes(autoConnectParam.trim().toLowerCase())) {
     autoConnect = true;
   }
-  const shouldResetSessionForToken = Boolean(token && !session && !gatewayUrlChanged);
+  const shouldResetSessionForToken = Boolean(
+    token && !session && !hotelIdHint && !gatewayUrlChanged,
+  );
   let shouldCleanUrl = false;
 
   if (params.has("token") || params.has("gatewayToken")) {
@@ -250,10 +303,68 @@ export function resolveApplicationStartupSettings(
     shouldCleanUrl = true;
   }
 
-  if (session) {
+  // PHHotel: session must be hotel-<tenantId> so phhotel-usage can check quota + record tokens.
+  // tenantId === hotelId, lấy từ hash/query hoặc từ hostname {tenantId}.phhotel.vn
+  const PHHOTEL_CTX_KEY = "openclaw.phhotel.context.v1";
+  const isUnscopedMainSession = (key: string | undefined | null): boolean => {
+    if (!key || !String(key).trim()) {
+      return true;
+    }
+    const k = String(key).trim().toLowerCase();
+    return k === "main" || /^agent:[^:]+:main$/.test(k);
+  };
+  const sessionHasHotel = (key: string | undefined | null): boolean =>
+    /(?:^|[:/_-])(?:hotel|phhotel)[:_-]/i.test(String(key || ""));
+  const buildHotelSession = (hotelId: string, userId?: string | null): string =>
+    userId ? `hotel-${hotelId}__u-${userId}` : `hotel-${hotelId}`;
+
+  let resolvedHotelId = hotelIdHint;
+  let resolvedUserId = userIdParam;
+  if (resolvedHotelId) {
+    try {
+      globalThis.localStorage?.setItem(
+        PHHOTEL_CTX_KEY,
+        JSON.stringify({ hotelId: resolvedHotelId, userId: resolvedUserId || null }),
+      );
+    } catch {
+      // ignore
+    }
+  } else {
+    try {
+      const raw = globalThis.localStorage?.getItem(PHHOTEL_CTX_KEY);
+      const parsed = raw ? (JSON.parse(raw) as { hotelId?: string; userId?: string | null }) : null;
+      if (parsed?.hotelId && typeof parsed.hotelId === "string") {
+        resolvedHotelId = normalizeOptionalString(parsed.hotelId) ?? undefined;
+        resolvedUserId = normalizeOptionalString(parsed.userId) ?? resolvedUserId ?? undefined;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  let effectiveSession = session;
+  if (resolvedHotelId) {
+    if (
+      !effectiveSession ||
+      isUnscopedMainSession(effectiveSession) ||
+      !sessionHasHotel(effectiveSession)
+    ) {
+      effectiveSession = buildHotelSession(resolvedHotelId, resolvedUserId);
+    }
+    // Keep hotelId (= tenantId) in hash so refresh / share still scopes quota correctly.
+    hashParams.set("hotelId", resolvedHotelId);
+    if (resolvedUserId) {
+      hashParams.set("userId", resolvedUserId);
+    }
+    hashParams.set("session", effectiveSession);
+    params.delete("session");
+    shouldCleanUrl = true;
+  }
+
+  if (effectiveSession) {
     updateSettings({
-      sessionKey: session,
-      lastActiveSessionKey: session,
+      sessionKey: effectiveSession,
+      lastActiveSessionKey: effectiveSession,
     });
   }
 

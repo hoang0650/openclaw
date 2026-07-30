@@ -11,7 +11,10 @@ import {
   saveSettings,
   type UiSettings,
 } from "./settings.ts";
-import { resolveApplicationStartupSettings } from "./startup-settings.ts";
+import {
+  resolveApplicationStartupSettings,
+  parsePhhotelTenantHotelId,
+} from "./startup-settings.ts";
 
 function setTestLocation(params: { protocol: string; host: string; pathname: string }) {
   vi.stubGlobal("location", {
@@ -47,6 +50,16 @@ function setControlUiBasePath(value: string | undefined) {
 function expectedGatewayUrl(basePath: string): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host}${basePath}`;
+}
+
+/** Fixture host only — hotelId must be read back via parsePhhotelTenantHotelId. */
+function stubPhhotelTenantPageHost(): string {
+  const tenantId = Array.from({ length: 24 }, () =>
+    Math.floor(Math.random() * 16).toString(16),
+  ).join("");
+  const host = `${tenantId}.phhotel.vn`;
+  setTestLocation({ protocol: "https:", host, pathname: "/chat" });
+  return host;
 }
 
 function makeSettings(gatewayUrl: string, overrides: Partial<UiSettings> = {}): UiSettings {
@@ -117,6 +130,39 @@ describe("resolveApplicationStartupSettings", () => {
     expect(startup.pendingGatewayUrl).toBeNull();
     expect(startup.location.hash).not.toContain("token=");
     expect(startup.location.hash).not.toContain("password=");
+  });
+
+  it("forces hotel session from gatewayUrl host {tenantId}.phhotel.vn when session=main", () => {
+    stubPhhotelTenantPageHost();
+    const gatewayUrl = `wss://${location.hostname}`;
+    const hotelId = parsePhhotelTenantHotelId(gatewayUrl);
+    expect(hotelId).toBeTruthy();
+
+    const startup = resolveApplicationStartupSettings(makeSettings("wss://old.example"), {
+      pathname: "/chat",
+      search: "?session=agent%3Amain%3Amain",
+      hash: `#gatewayUrl=${encodeURIComponent(gatewayUrl)}&token=gtok-123&autoConnect=true&session=main`,
+    });
+
+    expect(startup.settings.sessionKey).toBe(`hotel-${hotelId}`);
+    expect(startup.settings.lastActiveSessionKey).toBe(`hotel-${hotelId}`);
+    expect(startup.location.hash).toContain(`hotelId=${hotelId}`);
+    expect(startup.location.hash).toContain(`session=hotel-${hotelId}`);
+  });
+
+  it("forces hotel session from page hostname {tenantId}.phhotel.vn (tenantId === hotelId)", () => {
+    stubPhhotelTenantPageHost();
+    const hotelId = parsePhhotelTenantHotelId(location.hostname);
+    expect(hotelId).toBeTruthy();
+
+    const startup = resolveApplicationStartupSettings(makeSettings("wss://old.example"), {
+      pathname: "/chat",
+      search: "?session=agent%3Amain%3Amain",
+      hash: "",
+    });
+
+    expect(startup.settings.sessionKey).toBe(`hotel-${hotelId}`);
+    expect(startup.location.hash).toContain(`hotelId=${hotelId}`);
   });
 
   it("accepts base64 #config= payload aliases", () => {
