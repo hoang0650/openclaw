@@ -45,7 +45,10 @@ import {
   saveSettings,
   type UiSettings,
 } from "./settings.ts";
-import { resolveApplicationStartupSettings } from "./startup-settings.ts";
+import {
+  resolveApplicationStartupSettings,
+  isPhhotelUnscopedMainSession,
+} from "./startup-settings.ts";
 import { startThemeTransition } from "./theme-transition.ts";
 import { resolveTheme, type ThemeMode } from "./theme.ts";
 import { createWebPushCapability } from "./web-push.ts";
@@ -61,8 +64,11 @@ function normalizeInitialApplicationLocation(
   }
 
   const search = new URLSearchParams(location.search);
-  if (!search.get("session")?.trim()) {
-    search.set("session", sessionKey);
+  const current = search.get("session")?.trim() || "";
+  const preferred = sessionKey.trim();
+  // PHHotel: ghi đè ?session=agent:main:main bằng hotel-<tenantId>
+  if (!current || isPhhotelUnscopedMainSession(current) || current !== preferred) {
+    search.set("session", preferred);
   }
   return {
     ...location,

@@ -21,6 +21,7 @@ import {
   patchSettings,
   persistSessionToken,
 } from "./settings.ts";
+import { resolvePhhotelScopedSessionKey } from "./startup-settings.ts";
 
 type GatewayClientFactory = (opts: GatewayBrowserClientOptions) => GatewayBrowserClient;
 
@@ -168,8 +169,20 @@ export function createApplicationGateway(
           settings = loadSettings();
         }
         const sessionDefaults = readSessionDefaults(hello);
-        const sessionKey = resolveSessionKey(snapshot.sessionKey, hello);
-        const lastActiveSessionKey = resolveSessionKey(settings.lastActiveSessionKey, hello);
+        let sessionKey = resolveSessionKey(snapshot.sessionKey, hello);
+        let lastActiveSessionKey = resolveSessionKey(settings.lastActiveSessionKey, hello);
+        // Domain {tenantId}.phhotel.vn → buộc hotel-<tenantId>, không giữ agent:main:main
+        const scoped = resolvePhhotelScopedSessionKey(
+          sessionKey,
+          globalThis.location?.hostname,
+          globalThis.location?.host,
+          connection.gatewayUrl,
+          settings.gatewayUrl,
+        );
+        if (scoped) {
+          sessionKey = scoped;
+          lastActiveSessionKey = scoped;
+        }
         if (
           sessionKey !== settings.sessionKey ||
           lastActiveSessionKey !== settings.lastActiveSessionKey
@@ -254,7 +267,17 @@ export function createApplicationGateway(
     },
     connect,
     setSessionKey: (sessionKey) => {
-      const nextSessionKey = sessionKey.trim();
+      let nextSessionKey = sessionKey.trim();
+      const scoped = resolvePhhotelScopedSessionKey(
+        nextSessionKey,
+        globalThis.location?.hostname,
+        globalThis.location?.host,
+        connection.gatewayUrl,
+        settings.gatewayUrl,
+      );
+      if (scoped) {
+        nextSessionKey = scoped;
+      }
       if (!nextSessionKey || nextSessionKey === snapshot.sessionKey) {
         return;
       }

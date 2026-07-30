@@ -165,13 +165,36 @@ function resolveHotelId(cfg: PluginConfig, sessionId: string, ctx: unknown): str
   const fromWorkspace = parseIdsFromSession(readString(ctxObj.workspaceDir)).hotelId;
   // tenantId trên domain gateway / wss URL (vd 69d73f54e5302e4f720b66af.phhotel.vn)
   const fromHost = parseHotelIdFromHost(
-    readString(ctxObj.gatewayUrl, ctxObj.host, ctxObj.hostname, ctxObj.publicUrl, ctxObj.origin),
+    readString(
+      ctxObj.gatewayUrl,
+      ctxObj.host,
+      ctxObj.hostname,
+      ctxObj.publicUrl,
+      ctxObj.origin,
+      ctxObj.requestHost,
+      ctxObj.forwardedHost,
+    ),
   );
+  // Quét mọi string trong ctx tìm {24hex}.phhotel.vn (Host từ reverse proxy)
+  let fromCtxScan = "";
+  for (const [key, value] of Object.entries(ctxObj)) {
+    if (fromCtxScan) break;
+    if (typeof value === "string") {
+      fromCtxScan = parseHotelIdFromHost(value);
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      const nested = asRecord(value);
+      fromCtxScan = parseHotelIdFromHost(
+        readString(nested.host, nested.hostname, nested.origin, nested.url, nested.gatewayUrl),
+      );
+    }
+    void key;
+  }
   return (
     fromSession ||
     fromCtxSession ||
     fromWorkspace ||
     fromHost ||
+    fromCtxScan ||
     readString(cfg.hotelId) ||
     readString(readEnv("PHHOTEL_HOTEL_ID"), readEnv("OPENCLAW_HOTEL_ID")) ||
     readString(ctxObj.hotelId, ctxObj.tenantId) ||

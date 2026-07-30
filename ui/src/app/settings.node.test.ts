@@ -162,6 +162,7 @@ describe("resolveApplicationStartupSettings", () => {
     });
 
     expect(startup.settings.sessionKey).toBe(`hotel-${hotelId}`);
+    expect(startup.location.search).toContain(`session=hotel-${hotelId}`);
     expect(startup.location.hash).toContain(`hotelId=${hotelId}`);
   });
 

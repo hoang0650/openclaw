@@ -75,6 +75,37 @@ export function parsePhhotelTenantHotelId(
   return undefined;
 }
 
+/** Session chưa gắn hotel (main / agent:*:main). */
+export function isPhhotelUnscopedMainSession(key: string | undefined | null): boolean {
+  if (!key || !String(key).trim()) {
+    return true;
+  }
+  const k = String(key).trim().toLowerCase();
+  return k === "main" || /^agent:[^:]+:main$/.test(k);
+}
+
+/**
+ * Trên domain {tenantId}.phhotel.vn: buộc session hotel-<tenantId>
+ * thay vì main / agent:main:main (để phhotel-usage trừ hạn ngạch đúng).
+ */
+export function resolvePhhotelScopedSessionKey(
+  currentSessionKey: string | undefined | null,
+  ...hostCandidates: Array<string | null | undefined>
+): string | undefined {
+  const hotelId = parsePhhotelTenantHotelId(...hostCandidates);
+  if (!hotelId) {
+    return undefined;
+  }
+  const current = normalizeOptionalString(currentSessionKey) ?? "";
+  if (!current || isPhhotelUnscopedMainSession(current)) {
+    return `hotel-${hotelId}`;
+  }
+  if (!/(?:^|[:/_-])(?:hotel|phhotel)[:_-]/i.test(current)) {
+    return `hotel-${hotelId}`;
+  }
+  return undefined;
+}
+
 function readParam(
   params: URLSearchParams,
   hashParams: URLSearchParams,
@@ -306,13 +337,6 @@ export function resolveApplicationStartupSettings(
   // PHHotel: session must be hotel-<tenantId> so phhotel-usage can check quota + record tokens.
   // tenantId === hotelId, lấy từ hash/query hoặc từ hostname {tenantId}.phhotel.vn
   const PHHOTEL_CTX_KEY = "openclaw.phhotel.context.v1";
-  const isUnscopedMainSession = (key: string | undefined | null): boolean => {
-    if (!key || !String(key).trim()) {
-      return true;
-    }
-    const k = String(key).trim().toLowerCase();
-    return k === "main" || /^agent:[^:]+:main$/.test(k);
-  };
   const sessionHasHotel = (key: string | undefined | null): boolean =>
     /(?:^|[:/_-])(?:hotel|phhotel)[:_-]/i.test(String(key || ""));
   const buildHotelSession = (hotelId: string, userId?: string | null): string =>
@@ -343,21 +367,32 @@ export function resolveApplicationStartupSettings(
   }
 
   let effectiveSession = session;
+  // Domain {tenantId}.phhotel.vn luôn thắng session=main trên query string
+  if (!resolvedHotelId) {
+    resolvedHotelId = parsePhhotelTenantHotelId(
+      globalThis.location?.hostname,
+      globalThis.location?.host,
+      nextGatewayUrl,
+      gatewayUrlRaw,
+      settings.gatewayUrl,
+    );
+  }
+
   if (resolvedHotelId) {
     if (
       !effectiveSession ||
-      isUnscopedMainSession(effectiveSession) ||
+      isPhhotelUnscopedMainSession(effectiveSession) ||
       !sessionHasHotel(effectiveSession)
     ) {
       effectiveSession = buildHotelSession(resolvedHotelId, resolvedUserId);
     }
-    // Keep hotelId (= tenantId) in hash so refresh / share still scopes quota correctly.
     hashParams.set("hotelId", resolvedHotelId);
     if (resolvedUserId) {
       hashParams.set("userId", resolvedUserId);
     }
     hashParams.set("session", effectiveSession);
-    params.delete("session");
+    // Ghi đè ?session=agent:main:main — nếu chỉ delete thì app-host đọc URL cũ sẽ về main
+    params.set("session", effectiveSession);
     shouldCleanUrl = true;
   }
 

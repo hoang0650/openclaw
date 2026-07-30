@@ -51,8 +51,8 @@ import { isTerminalAvailable } from "../lib/terminal-availability.ts";
 import { OpenClawLightDomElement } from "../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../lit/subscriptions-controller.ts";
 import { findSettingsSearchBlocks } from "../pages/config/settings-search.ts";
-import "../pages/approval/approval-page-registration.ts";
 import { newSessionSearch, type NewSessionTarget } from "../pages/new-session/location.ts";
+import "../pages/approval/approval-page-registration.ts";
 import { renderDevicePairSetup } from "../pages/nodes/view-pairing.ts";
 import { pluginTabKey, pluginTabRefFromSearch } from "../pages/plugin/route.ts";
 import { bootstrapApplication, type ApplicationRuntime } from "./bootstrap.ts";
@@ -90,6 +90,7 @@ import {
   loadSettings,
   normalizeCatalogOpenTarget,
 } from "./settings.ts";
+import { resolvePhhotelScopedSessionKey } from "./startup-settings.ts";
 
 type ShellRouteState = {
   routeId?: RouteId;
@@ -1166,7 +1167,17 @@ class OpenClawShell extends OpenClawLightDomElement {
     if (routeState.routeId !== "chat") {
       return;
     }
-    const sessionKey = new URLSearchParams(routeState.location?.search).get("session")?.trim();
+    let sessionKey = new URLSearchParams(routeState.location?.search).get("session")?.trim();
+    const scoped = resolvePhhotelScopedSessionKey(
+      sessionKey,
+      globalThis.location?.hostname,
+      globalThis.location?.host,
+      this.context?.gateway.connection.gatewayUrl,
+    );
+    if (scoped) {
+      sessionKey = scoped;
+      this.context?.gateway.setSessionKey(scoped);
+    }
     if (sessionKey) {
       this.activeSessionKey = sessionKey;
     }
