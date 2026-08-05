@@ -1,5 +1,6 @@
 # Paste vào Dokploy → Traefik File System → traefik.yml (file chính)
 # Giữ HTTP-01 Let's Encrypt cho từng subdomain (HostRegexp).
+# OpenClaw PHHotel: gateway --port 8080 → Domains/upstream dùng port 8080.
 # Wildcard cert *.phhotel.vn cần DNS-01 — xem comment cuối file.
 
 global:
