@@ -85,3 +85,13 @@ UI Domains **không** nhận `*.phhotel.vn`. Domain cụ thể thì thêm đư�
 
 **Quan trọng:** `HostRegexp` chỉ được khớp `^[a-f0-9]{24}\\.phhotel\\.vn$` (hotel ObjectId).  
 Regex kiểu `^[a-z0-9]+` sẽ nuốt luôn `ai` / `api` / `app` → hotelapp gọi `ai.phhotel.vn` bị CORS / `0 Unknown Error`.
+
+Thêm router `Host(\`openclaw.phhotel.vn\`)`(shared gateway). Không có LE → PHGroup-AI lỗi`CERTIFICATE_VERIFY_FAILED`.
+
+PHGroup-AI (server RPC) nên set:
+
+```bash
+OPENCLAW_INTERNAL_GATEWAY_URL=http://phhotel-openclaw-cexp1q:8080
+OPENCLAW_GATEWAY_URL=https://openclaw.phhotel.vn
+OPENCLAW_PUBLIC_GATEWAY_URL=https://openclaw.phhotel.vn
+```

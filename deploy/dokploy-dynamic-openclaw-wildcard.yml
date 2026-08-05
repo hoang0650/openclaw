@@ -30,6 +30,18 @@ http:
         certResolver: letsencrypt
       priority: 50
 
+    # Shared gateway hostname (PHGroup-AI OPENCLAW_GATEWAY_URL)
+    openclaw-shared-https:
+      rule: "Host(`openclaw.phhotel.vn`)"
+      entryPoints:
+        - websecure
+      service: openclaw-wildcard-svc
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "openclaw.phhotel.vn"
+      priority: 200
+
   services:
     openclaw-wildcard-svc:
       loadBalancer:
