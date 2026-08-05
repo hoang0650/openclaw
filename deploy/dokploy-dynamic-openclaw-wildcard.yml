@@ -13,21 +13,22 @@
 
 http:
   routers:
+    # Chỉ hotelId = Mongo ObjectId (24 hex). KHÔNG dùng ^[a-z0-9]+ — sẽ nuốt ai/api/app.
     openclaw-wildcard-http:
-      rule: "HostRegexp(`^[a-z0-9]+\\.phhotel\\.vn$`)"
+      rule: "HostRegexp(`^[a-f0-9]{24}\\.phhotel\\.vn$`)"
       entryPoints:
         - web
       service: openclaw-wildcard-svc
-      priority: 100
+      priority: 50
 
     openclaw-wildcard-https:
-      rule: "HostRegexp(`^[a-z0-9]+\\.phhotel\\.vn$`)"
+      rule: "HostRegexp(`^[a-f0-9]{24}\\.phhotel\\.vn$`)"
       entryPoints:
         - websecure
       service: openclaw-wildcard-svc
       tls:
         certResolver: letsencrypt
-      priority: 100
+      priority: 50
 
   services:
     openclaw-wildcard-svc:

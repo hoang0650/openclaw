@@ -82,3 +82,6 @@ Chạy một lần job/container alpine với cùng volume: `chown -R 1000:1000 
 5. Reload Traefik
 
 UI Domains **không** nhận `*.phhotel.vn`. Domain cụ thể thì thêm được với port **8080**.
+
+**Quan trọng:** `HostRegexp` chỉ được khớp `^[a-f0-9]{24}\\.phhotel\\.vn$` (hotel ObjectId).  
+Regex kiểu `^[a-z0-9]+` sẽ nuốt luôn `ai` / `api` / `app` → hotelapp gọi `ai.phhotel.vn` bị CORS / `0 Unknown Error`.
