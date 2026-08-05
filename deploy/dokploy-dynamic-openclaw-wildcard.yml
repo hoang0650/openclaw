@@ -1,0 +1,37 @@
+# Paste vào Dokploy → Traefik File System → dynamic/openclaw-wildcard.yml
+#
+# DNS Mat Bao: A record Host=* → IP VPS (72.62.72.165)
+#
+# Sửa `url` cho khớp container/service OpenClaw trên dokploy-network:
+#   - Tên service Dokploy thường dạng: phhotel-openclaw-xxxxx
+#   - Port: 8080 nếu command có --port 8080, hoặc 18789 (mặc định image)
+#
+# Không thêm *.phhotel.vn trong UI Domains (Dokploy reject *).
+
+http:
+  routers:
+    openclaw-wildcard-http:
+      rule: "HostRegexp(`^[a-z0-9-]+\\.phhotel\\.vn$`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: openclaw-wildcard-svc
+      priority: 10
+
+    openclaw-wildcard-https:
+      rule: "HostRegexp(`^[a-z0-9-]+\\.phhotel\\.vn$`)"
+      entryPoints:
+        - websecure
+      service: openclaw-wildcard-svc
+      tls:
+        certResolver: letsencrypt
+      priority: 10
+
+  services:
+    openclaw-wildcard-svc:
+      loadBalancer:
+        servers:
+          # TODO: thay bằng tên service thật + port trong Docker
+          - url: "http://phhotel-openclaw-cexp1q:8080"
+        passHostHeader: true

@@ -1,0 +1,9 @@
+# Paste vào Dokploy → Traefik File System → dynamic/middlewares.yml
+# (tên file bất kỳ trong thư mục dynamic)
+
+http:
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true

@@ -1,0 +1,59 @@
+# Paste vào Dokploy → Traefik File System → traefik.yml (file chính)
+# Giữ HTTP-01 Let's Encrypt cho từng subdomain (HostRegexp).
+# Wildcard cert *.phhotel.vn cần DNS-01 — xem comment cuối file.
+
+global:
+  sendAnonymousUsage: false
+
+providers:
+  swarm:
+    exposedByDefault: false
+    watch: true
+  docker:
+    exposedByDefault: false
+    watch: true
+    network: dokploy-network
+  file:
+    directory: /etc/dokploy/traefik/dynamic
+    watch: true
+
+entryPoints:
+  web:
+    address: :80
+    # Redirect HTTP → HTTPS (trừ ACME challenge — Traefik xử lý trước redirect)
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: :443
+    http3:
+      advertisedPort: 443
+    http:
+      tls:
+        certResolver: letsencrypt
+
+api:
+  insecure: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: hoangphan29091999@gmail.com
+      storage: /etc/dokploy/traefik/dynamic/acme.json
+      httpChallenge:
+        entryPoint: web
+
+# --- Tuỳ chọn sau này: cert *.phhotel.vn (cần DNS API, ví dụ Cloudflare) ---
+# certificatesResolvers:
+#   letsencrypt-dns:
+#     acme:
+#       email: hoangphan29091999@gmail.com
+#       storage: /etc/dokploy/traefik/dynamic/acme-dns.json
+#       dnsChallenge:
+#         provider: cloudflare
+#         resolvers:
+#           - "1.1.1.1:53"
+#           - "8.8.8.8:53"
