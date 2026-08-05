@@ -2,20 +2,19 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  addMeetingSetupCheck,
+  createMeetingSetupStatus,
+  MeetingPlatformAdapter,
+  type MeetingSetupCheck,
+  type MeetingSetupStatus,
+} from "openclaw/plugin-sdk/meeting-runtime";
 import { isBlockedHostnameOrIp } from "openclaw/plugin-sdk/ssrf-runtime";
 import { asRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { GoogleMeetConfig, GoogleMeetMode, GoogleMeetTransport } from "./config.js";
 
-type SetupCheck = {
-  id: string;
-  ok: boolean;
-  message: string;
-};
-
-type GoogleMeetSetupStatus = {
-  ok: boolean;
-  checks: SetupCheck[];
-};
+type SetupCheck = MeetingSetupCheck;
+type GoogleMeetSetupStatus = MeetingSetupStatus;
 
 function resolveUserPath(input: string): string {
   if (input === "~") {
@@ -115,7 +114,7 @@ export function getGoogleMeetSetupStatus(
   const mode = options?.mode ?? config.defaultMode;
   const transport = options?.transport ?? config.defaultTransport;
   const needsChromeRealtimeAudio =
-    (mode === "agent" || mode === "bidi") &&
+    MeetingPlatformAdapter.isTalkBackMode(mode) &&
     (transport === "chrome" || transport === "chrome-node");
   const pluginEntries = asRecord(asRecord(fullConfig.plugins).entries);
   const pluginAllow = asRecord(fullConfig.plugins).allow;
@@ -268,19 +267,12 @@ export function getGoogleMeetSetupStatus(
     }
   }
 
-  return {
-    ok: checks.every((check) => check.ok),
-    checks,
-  };
+  return createMeetingSetupStatus(checks);
 }
 
 export function addGoogleMeetSetupCheck(
   status: GoogleMeetSetupStatus,
   check: SetupCheck,
 ): GoogleMeetSetupStatus {
-  const checks = [...status.checks, check];
-  return {
-    ok: checks.every((item) => item.ok),
-    checks,
-  };
+  return addMeetingSetupCheck(status, check);
 }

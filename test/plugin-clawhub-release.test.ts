@@ -236,6 +236,16 @@ describe("OpenClaw dual-published plugin metadata", () => {
         npmSpec: "@openclaw/gmi-provider",
       },
     },
+    {
+      extensionId: "novita",
+      packageName: "@openclaw/novita-provider",
+      install: {
+        clawhubSpec: "clawhub:@openclaw/novita-provider",
+        defaultChoice: "npm",
+        minHostVersion: ">=2026.7.2",
+        npmSpec: "@openclaw/novita-provider",
+      },
+    },
   ] as const;
 
   it("keeps dual-published plugins selectable through both ClawHub and npm release paths", () => {
@@ -431,6 +441,61 @@ describe("resolveSelectedClawHubPublishablePluginPackages", () => {
 });
 
 describe("collectPluginClawHubReleasePlan", () => {
+  it("bounds parallel ClawHub package-state reads and preserves plan order", async () => {
+    const extraExtensionIds = Array.from({ length: 11 }, (_, index) => `demo-${index + 2}`);
+    const repoDir = createTempPluginRepo({ extraExtensionIds });
+    const packageNames = ["demo-plugin", ...extraExtensionIds].map(
+      (extensionId) => `@openclaw/${extensionId}`,
+    );
+    const baseFetch = createClawHubPlanFetch({
+      packages: Object.fromEntries(
+        packageNames.map((packageName) => [packageName, { status: 200 }]),
+      ),
+      trustedPublishers: Object.fromEntries(
+        packageNames.map((packageName) => [
+          packageName,
+          {
+            status: 200,
+            body: {
+              trustedPublisher: {
+                repository: "openclaw/openclaw",
+                workflowFilename: "plugin-clawhub-release.yml",
+              },
+            },
+          },
+        ]),
+      ),
+      versions: Object.fromEntries(
+        packageNames.map((packageName) => [`${packageName}@2026.4.1`, 404]),
+      ),
+    }).fetchImpl;
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    const fetchImpl: typeof fetch = async (...args) => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      try {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5);
+        });
+        return await baseFetch(...args);
+      } finally {
+        activeRequests -= 1;
+      }
+    };
+
+    const plan = await collectPluginClawHubReleasePlan({
+      rootDir: repoDir,
+      selectionMode: "all-publishable",
+      fetchImpl,
+      registryBaseUrl: "https://clawhub.ai",
+    });
+
+    expect(maxActiveRequests).toBe(8);
+    expect(plan.all.map((plugin) => plugin.packageName)).toEqual(packageNames.toSorted());
+    expect(plan.candidates.map((plugin) => plugin.packageName)).toEqual(packageNames.toSorted());
+  });
+
   it("rejects stale required dependencies before querying ClawHub", async () => {
     const repoDir = createTempPluginRepo({
       requiredLatestDependencyVersion: "1.2.3",
