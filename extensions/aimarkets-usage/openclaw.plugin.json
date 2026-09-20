@@ -1,0 +1,37 @@
+{
+  "id": "aimarkets-usage",
+  "activation": {
+    "onStartup": true
+  },
+  "name": "AI Markets OpenClaw Usage",
+  "description": "Charge AI Markets wallet for OpenClaw LLM usage (provider COGS + 25% markup). Skips PHHotel sessions.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiBaseUrl": { "type": "string" },
+      "serviceSecret": { "type": "string" },
+      "markup": { "type": "number" },
+      "userId": { "type": "string" }
+    }
+  },
+  "uiHints": {
+    "apiBaseUrl": {
+      "label": "AI Markets API base URL",
+      "help": "Default: https://api.aimarkets.vn or env AIMARKETS_API_URL"
+    },
+    "serviceSecret": {
+      "label": "Service secret",
+      "sensitive": true,
+      "help": "Must match AIMARKETS_SERVICE_SECRET / NEST_SERVICE_AUTH_SECRET on ai-marketplace-api"
+    },
+    "markup": {
+      "label": "Provider markup",
+      "help": "Default 0.25 (+25% over Featherless/OpenRouter COGS)"
+    },
+    "userId": {
+      "label": "Default user id",
+      "advanced": true
+    }
+  }
+}

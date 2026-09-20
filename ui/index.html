@@ -8,10 +8,35 @@
     />
     <title>OpenClaw Control</title>
     <meta name="color-scheme" content="dark light" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" id="oc-favicon-svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" id="oc-favicon-png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" id="oc-apple-touch" />
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <script>
+      (function () {
+        try {
+          var host = (location.hostname || "").toLowerCase();
+          var aimarkets =
+            host === "openclaw.aimarkets.vn" ||
+            host === "aimarkets.vn" ||
+            /\.openclaw\.aimarkets\.vn$/.test(host) ||
+            /[?&#]audience=aimarkets/i.test(location.href);
+          if (!aimarkets) return;
+          document.title = "AI Markets · OpenClaw";
+          var icon = "/aimarkets-icon.png";
+          var svg = document.getElementById("oc-favicon-svg");
+          var png = document.getElementById("oc-favicon-png");
+          var apple = document.getElementById("oc-apple-touch");
+          if (svg) {
+            svg.type = "image/png";
+            svg.href = icon;
+          }
+          if (png) png.href = icon;
+          if (apple) apple.href = icon;
+          document.documentElement.setAttribute("data-openclaw-audience", "aimarkets");
+        } catch (e) {}
+      })();
+    </script>
     <script>
       // Configure Zod before module evaluation so its JIT probe cannot violate strict CSP.
       globalThis.__zod_globalConfig ??= {};

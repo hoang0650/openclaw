@@ -12,7 +12,7 @@ import {
 } from "../../lib/gateway-errors.ts";
 import { loadModelAuthStatus } from "../../lib/model-auth.ts";
 import { requestSessionUsage } from "../../lib/sessions/index.ts";
-import { loadModels } from "../chat/models.ts";
+import { applyModelCatalogResult, loadModels } from "../chat/models.ts";
 
 /** Local session-spend window shown on each card. */
 export const MODEL_PROVIDERS_COST_DAYS = 30;
@@ -76,7 +76,7 @@ export async function loadModelProvidersData(
         view: "all",
         includeProviderCapabilities: true,
       })
-        .then((result) => result?.models ?? null)
+        .then((result) => applyModelCatalogResult(result?.models ?? []) ?? null)
         .catch(() => null),
       request<ConfigSnapshot>("config.get", {})
         .then((snapshot) => resolveEditableSnapshotConfig(snapshot))

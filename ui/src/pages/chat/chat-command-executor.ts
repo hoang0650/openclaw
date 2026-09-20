@@ -47,6 +47,7 @@ import {
 } from "../../lib/string-coerce.ts";
 import { generateUUID } from "../../lib/uuid.ts";
 import { patchChatCommandSessionSettings, selectedGlobalScope } from "./chat-settings-patches.ts";
+import { applyModelCatalogResult } from "./models.ts";
 
 type SlashCommandResult = {
   /** Markdown-formatted result to display in chat. */
@@ -795,7 +796,7 @@ async function loadModelCatalog(
     const result = await client.request<{ models: ModelCatalogEntry[] }>("models.list", {
       view: "configured",
     });
-    return result?.models ?? [];
+    return applyModelCatalogResult(result?.models ?? []) ?? [];
   } catch (err) {
     if (opts?.allowFailure) {
       return [];

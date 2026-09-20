@@ -121,4 +121,18 @@ Marketplace API:
 ```bash
 OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
 AI_URL=https://ai.aimarkets.vn
+AIMARKETS_API_URL=https://api.aimarkets.vn
+AIMARKETS_SERVICE_SECRET=<shared with openclaw aimarkets-usage plugin>
+OPENCLAW_AIMARKETS_MARKUP=0.25
 ```
+
+OpenClaw gateway env (shared keys with denglish-api OpenRouter/Featherless):
+
+```bash
+FEATHERLESS_API_KEY=...
+OPENROUTER_API_KEY=...
+AIMARKETS_API_URL=https://api.aimarkets.vn
+AIMARKETS_SERVICE_SECRET=<same as API>
+```
+
+**Models:** PHHotel Nest stack (`phhotel-main` / DeepSeek Flash / Qwen / MiniMax) stays on `{hotelId}.phhotel.vn`. AI Markets Control UI only lists `aimarkets-*` OpenRouter/Featherless catalog; usage is billed to the buyer wallet at **provider COGS + 25%**.

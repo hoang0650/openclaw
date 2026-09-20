@@ -1,6 +1,7 @@
 // Control UI model metadata boundary.
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ModelCatalogEntry } from "../../api/types.ts";
+import { filterModelsForAudience, resolveOpenClawAudience } from "../../app/audience-models.ts";
 
 const MODEL_CATALOG_CACHE_TTL_MS = 60_000;
 
@@ -11,6 +12,10 @@ type ModelCatalogCacheEntry = {
 };
 
 const modelCatalogCache = new WeakMap<GatewayBrowserClient, ModelCatalogCacheEntry>();
+
+function applyAudienceFilter(models: ModelCatalogEntry[]): ModelCatalogEntry[] {
+  return filterModelsForAudience(models, resolveOpenClawAudience());
+}
 
 export async function loadModels(
   client: GatewayBrowserClient,
@@ -57,7 +62,7 @@ export function applyModelCatalogResult(models: unknown): ModelCatalogEntry[] | 
   if (!Array.isArray(models)) {
     return null;
   }
-  return models as ModelCatalogEntry[];
+  return applyAudienceFilter(models as ModelCatalogEntry[]);
 }
 
 async function requestModels(
@@ -68,9 +73,9 @@ async function requestModels(
     const result = await client.request<{ models: ModelCatalogEntry[] }>("models.list", {
       view: "configured",
     });
-    return { models: result?.models ?? [], fresh: true };
+    return { models: applyAudienceFilter(result?.models ?? []), fresh: true };
   } catch {
     // Failed loads fall back without extending the TTL so the next call retries.
-    return { models: fallback ?? [], fresh: false };
+    return { models: applyAudienceFilter(fallback ?? []), fresh: false };
   }
 }
