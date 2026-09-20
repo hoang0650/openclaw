@@ -95,3 +95,30 @@ OPENCLAW_INTERNAL_GATEWAY_URL=http://phhotel-openclaw-cexp1q:8080
 OPENCLAW_GATEWAY_URL=https://openclaw.phhotel.vn
 OPENCLAW_PUBLIC_GATEWAY_URL=https://openclaw.phhotel.vn
 ```
+
+## AI Markets — wildcard `{userId}.openclaw.aimarkets.vn` (luồng mới)
+
+Không thay Traefik PHHotel. Dán thêm file `dokploy-dynamic-openclaw-aimarkets-wildcard.yml` → `dynamic/openclaw-aimarkets-wildcard.yml`.
+
+DNS Mắt Bão:
+
+| Host         | Type | Value                                             |
+| ------------ | ---- | ------------------------------------------------- |
+| `openclaw`   | A    | `72.62.72.165` → `openclaw.aimarkets.vn`          |
+| `*.openclaw` | A    | `72.62.72.165` → `{userId}.openclaw.aimarkets.vn` |
+
+Regex chỉ `^[a-f0-9]{24}\\.openclaw\\.aimarkets\\.vn$` (buyer ObjectId). Cùng upstream port **8080** với gateway PHHotel.
+
+PHGroup-AI (`ai.aimarkets.vn`) env **thêm** (không đổi template PHHotel):
+
+```bash
+OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
+OPENCLAW_AIMARKETS_TENANT_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
+```
+
+Marketplace API:
+
+```bash
+OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
+AI_URL=https://ai.aimarkets.vn
+```

@@ -138,6 +138,20 @@ function parseHotelIdFromHost(value: string): string {
   }
 }
 
+/** AI Markets buyer session / host — skip PHHotel hotel quota. */
+function isAimarketsMarketContext(sessionId: string, ctx: unknown): boolean {
+  const raw = String(sessionId || "").trim();
+  if (/(?:^|[:/_-])market[:_-][a-f0-9]{24}/i.test(raw)) {
+    return true;
+  }
+  const ctxObj = asRecord(ctx);
+  const hostBits = [
+    readString(ctxObj.gatewayUrl, ctxObj.host, ctxObj.hostname, ctxObj.publicUrl, ctxObj.origin),
+    raw,
+  ];
+  return hostBits.some((value) => /\.openclaw\.aimarkets\.vn/i.test(value));
+}
+
 function resolveHotelIdFromEnvHosts(): string {
   const candidates = [
     readEnv("OPENCLAW_GATEWAY_URL"),
@@ -463,6 +477,9 @@ export default definePluginEntry({
     // Gate: chặn trước khi agent gọi Featherless nếu hết hạn ngạch (đồng bộ hotelapp AI Usage)
     api.on("before_agent_run", async (_event: any, ctx: any) => {
       const sessionId = readString(asRecord(ctx).sessionKey, asRecord(ctx).sessionId);
+      if (isAimarketsMarketContext(sessionId, ctx)) {
+        return;
+      }
       let hotelId = resolveHotelId(cfg, sessionId, ctx);
       const userId = resolveUserId(cfg, sessionId, ctx);
 
@@ -531,6 +548,9 @@ export default definePluginEntry({
         event?.sessionId,
         asRecord(ctx).sessionId,
       );
+      if (isAimarketsMarketContext(sessionId, ctx)) {
+        return;
+      }
       const { input, output } = readUsageTokens(event?.usage);
       const model = readString(event?.resolvedRef, event?.model, event?.provider);
       const hotelId = resolveHotelId(cfg, sessionId, ctx);

@@ -25,7 +25,10 @@ import {
   patchSettings,
   persistSessionToken,
 } from "./settings.ts";
-import { resolvePhhotelScopedSessionKey } from "./startup-settings.ts";
+import {
+  resolveAimarketsScopedSessionKey,
+  resolvePhhotelScopedSessionKey,
+} from "./startup-settings.ts";
 import { readPresenceEntries, resolveSelfPresenceUser } from "./user-profile.ts";
 
 type GatewayClientFactory = (opts: GatewayBrowserClientOptions) => GatewayBrowserClient;
@@ -351,14 +354,23 @@ export function createApplicationGateway(
         const sessionDefaults = readSessionDefaults(hello);
         let sessionKey = resolveSessionKey(snapshot.sessionKey, hello);
         let lastActiveSessionKey = resolveSessionKey(settings.lastActiveSessionKey, hello);
-        // Domain {tenantId}.phhotel.vn → buộc hotel-<tenantId>, không giữ agent:main:main
-        const scoped = resolvePhhotelScopedSessionKey(
-          sessionKey,
-          globalThis.location?.hostname,
-          globalThis.location?.host,
-          connection.gatewayUrl,
-          settings.gatewayUrl,
-        );
+        // Domain {tenantId}.phhotel.vn → hotel-<tenantId>
+        // Domain {userId}.openclaw.aimarkets.vn → market-<userId>
+        const scoped =
+          resolvePhhotelScopedSessionKey(
+            sessionKey,
+            globalThis.location?.hostname,
+            globalThis.location?.host,
+            connection.gatewayUrl,
+            settings.gatewayUrl,
+          ) ||
+          resolveAimarketsScopedSessionKey(
+            sessionKey,
+            globalThis.location?.hostname,
+            globalThis.location?.host,
+            connection.gatewayUrl,
+            settings.gatewayUrl,
+          );
         if (scoped) {
           sessionKey = scoped;
           lastActiveSessionKey = scoped;
@@ -490,13 +502,21 @@ export function createApplicationGateway(
     connect,
     setSessionKey: (sessionKey) => {
       let nextSessionKey = sessionKey.trim();
-      const scoped = resolvePhhotelScopedSessionKey(
-        nextSessionKey,
-        globalThis.location?.hostname,
-        globalThis.location?.host,
-        connection.gatewayUrl,
-        settings.gatewayUrl,
-      );
+      const scoped =
+        resolvePhhotelScopedSessionKey(
+          nextSessionKey,
+          globalThis.location?.hostname,
+          globalThis.location?.host,
+          connection.gatewayUrl,
+          settings.gatewayUrl,
+        ) ||
+        resolveAimarketsScopedSessionKey(
+          nextSessionKey,
+          globalThis.location?.hostname,
+          globalThis.location?.host,
+          connection.gatewayUrl,
+          settings.gatewayUrl,
+        );
       if (scoped) {
         nextSessionKey = scoped;
       }

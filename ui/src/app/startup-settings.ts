@@ -106,6 +106,55 @@ export function resolvePhhotelScopedSessionKey(
   return undefined;
 }
 
+/**
+ * AI Markets gateway host: https://{userId}.openclaw.aimarkets.vn
+ * userId === marketplace buyer Mongo ObjectId (24 hex). Separate from PHHotel hotelId.
+ */
+export function parseAimarketsUserId(
+  ...values: Array<string | null | undefined>
+): string | undefined {
+  for (const value of values) {
+    const raw = normalizeOptionalString(value);
+    if (!raw) {
+      continue;
+    }
+    try {
+      const host = raw.includes("://")
+        ? new URL(raw).hostname
+        : raw.split("/")[0]?.split(":")[0] || "";
+      const fromSubdomain = /^([a-f0-9]{24})\.openclaw\.aimarkets\.vn$/i.exec(host);
+      if (fromSubdomain) {
+        return fromSubdomain[1].toLowerCase();
+      }
+    } catch {
+      // ignore invalid URL
+    }
+  }
+  return undefined;
+}
+
+/**
+ * On {userId}.openclaw.aimarkets.vn: force session market-<userId>
+ * so PHHotel quota plugin does not treat the buyer as a hotel.
+ */
+export function resolveAimarketsScopedSessionKey(
+  currentSessionKey: string | undefined | null,
+  ...hostCandidates: Array<string | null | undefined>
+): string | undefined {
+  const userId = parseAimarketsUserId(...hostCandidates);
+  if (!userId) {
+    return undefined;
+  }
+  const current = normalizeOptionalString(currentSessionKey) ?? "";
+  if (!current || isPhhotelUnscopedMainSession(current)) {
+    return `market-${userId}`;
+  }
+  if (!/(?:^|[:/_-])market[:_-]/i.test(current)) {
+    return `market-${userId}`;
+  }
+  return undefined;
+}
+
 function readParam(
   params: URLSearchParams,
   hashParams: URLSearchParams,
@@ -394,6 +443,53 @@ export function resolveApplicationStartupSettings(
     // Ghi đè ?session=agent:main:main — nếu chỉ delete thì app-host đọc URL cũ sẽ về main
     params.set("session", effectiveSession);
     shouldCleanUrl = true;
+  }
+
+  // AI Markets: {userId}.openclaw.aimarkets.vn — never overwrite a PHHotel hotel session.
+  if (!resolvedHotelId) {
+    const AIMARKETS_CTX_KEY = "openclaw.aimarkets.context.v1";
+    let resolvedMarketUserId =
+      userIdParam ||
+      parseAimarketsUserId(
+        globalThis.location?.hostname,
+        globalThis.location?.host,
+        nextGatewayUrl,
+        gatewayUrlRaw,
+        settings.gatewayUrl,
+      );
+    if (resolvedMarketUserId) {
+      try {
+        globalThis.localStorage?.setItem(
+          AIMARKETS_CTX_KEY,
+          JSON.stringify({ userId: resolvedMarketUserId }),
+        );
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        const raw = globalThis.localStorage?.getItem(AIMARKETS_CTX_KEY);
+        const parsed = raw ? (JSON.parse(raw) as { userId?: string | null }) : null;
+        if (parsed?.userId && typeof parsed.userId === "string") {
+          resolvedMarketUserId = normalizeOptionalString(parsed.userId) ?? undefined;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (resolvedMarketUserId) {
+      if (
+        !effectiveSession ||
+        isPhhotelUnscopedMainSession(effectiveSession) ||
+        !/(?:^|[:/_-])market[:_-]/i.test(effectiveSession)
+      ) {
+        effectiveSession = `market-${resolvedMarketUserId}`;
+      }
+      hashParams.set("userId", resolvedMarketUserId);
+      hashParams.set("session", effectiveSession);
+      params.set("session", effectiveSession);
+      shouldCleanUrl = true;
+    }
   }
 
   if (effectiveSession) {

@@ -166,6 +166,43 @@ describe("resolveApplicationStartupSettings", () => {
     expect(startup.location.hash).toContain(`hotelId=${hotelId}`);
   });
 
+  it("forces market session from hostname {userId}.openclaw.aimarkets.vn", () => {
+    const userId = Array.from({ length: 24 }, () =>
+      Math.floor(Math.random() * 16).toString(16),
+    ).join("");
+    setTestLocation({
+      protocol: "https:",
+      host: `${userId}.openclaw.aimarkets.vn`,
+      pathname: "/chat",
+    });
+    const startup = resolveApplicationStartupSettings(makeSettings("wss://old.example"), {
+      pathname: "/chat",
+      search: "?session=agent%3Amain%3Amain",
+      hash: "",
+    });
+    expect(startup.settings.sessionKey).toBe(`market-${userId}`);
+    expect(startup.location.search).toContain(`session=market-${userId}`);
+    expect(startup.location.hash).toContain(`userId=${userId}`);
+    expect(startup.location.hash).not.toContain("hotelId=");
+  });
+
+  it("does not treat {userId}.openclaw.aimarkets.vn as a PHHotel hotel session", () => {
+    const userId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+    setTestLocation({
+      protocol: "https:",
+      host: `${userId}.openclaw.aimarkets.vn`,
+      pathname: "/",
+    });
+    expect(parsePhhotelTenantHotelId(location.hostname)).toBeUndefined();
+    const startup = resolveApplicationStartupSettings(makeSettings("wss://old.example"), {
+      pathname: "/",
+      search: "",
+      hash: `#gatewayUrl=${encodeURIComponent(`wss://${userId}.openclaw.aimarkets.vn`)}&token=gtok&autoConnect=true&session=main`,
+    });
+    expect(startup.settings.sessionKey).toBe(`market-${userId}`);
+    expect(startup.settings.sessionKey.startsWith("hotel-")).toBe(false);
+  });
+
   it("accepts base64 #config= payload aliases", () => {
     const payload = btoa(
       JSON.stringify({

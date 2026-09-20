@@ -16,7 +16,11 @@
         "https://openclaw.phhotel.vn",
         "https://openclaw-deu7.onrender.com",
         "https://admin.phhotel.vn",
-        "https://phhotel.vn"
+        "https://phhotel.vn",
+        "https://openclaw.aimarkets.vn",
+        "https://aimarkets.vn",
+        "https://www.aimarkets.vn",
+        "https://ai.aimarkets.vn"
       ],
       "dangerouslyAllowHostHeaderOriginFallback": true
     }
