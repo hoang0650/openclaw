@@ -8,7 +8,8 @@
       "192.168.0.0/16"
     ],
     "auth": {
-      "mode": "token"
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
     },
     "controlUi": {
       "basePath": "/",
@@ -199,9 +200,6 @@
       "model": "featherless/deepseek-ai/DeepSeek-V4-Flash",
       "heartbeat": {
         "every": "0m"
-      },
-      "compaction": {
-        "reserveTokensFloor": 20000
       },
       "models": {
         "featherless/deepseek-ai/DeepSeek-V4-Flash": {
