@@ -30,8 +30,8 @@ entryPoints:
           permanent: true
   websecure:
     address: :443
-    http3:
-      advertisedPort: 443
+    # HTTP/3 disabled: Edge/Chrome QUIC sometimes presents DEFAULT CERT for
+    # per-buyer Host() ACME certs while TCP HTTP/1.1 is Let's Encrypt.
     http:
       tls:
         certResolver: letsencrypt
