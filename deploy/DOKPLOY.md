@@ -100,6 +100,10 @@ OPENCLAW_PUBLIC_GATEWAY_URL=https://openclaw.phhotel.vn
 
 Không thay Traefik PHHotel. Dán thêm file `dokploy-dynamic-openclaw-aimarkets-wildcard.yml` → `dynamic/openclaw-aimarkets-wildcard.yml`.
 
+File **phải có** `services.openclaw-aimarkets-svc` → `http://phhotel-openclaw-cexp1q:8080` (đổi tên nếu Dokploy khác). Thiếu `services:` → Traefik trả **404 page not found** khi Launch.
+
+TLS: subdomain `{userId}.openclaw…` cần cert `*.openclaw.aimarkets.vn` (DNS-01). HTTP-01 chỉ cover apex → Chrome **Không bảo mật**. Yml đã khai `tls.domains` + `sans` sẵn khi bật DNS challenge.
+
 DNS Mắt Bão:
 
 | Host         | Type | Value                                             |

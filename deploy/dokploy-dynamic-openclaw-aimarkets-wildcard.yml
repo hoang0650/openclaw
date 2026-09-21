@@ -1,46 +1,33 @@
-# Paste → Dokploy → Traefik File System → dynamic/openclaw-aimarkets-wildcard.yml
+# Dokploy → Traefik File System → mở folder dynamic → tạo file mới
+#   openclaw-aimarkets-wildcard.yml
+# KHÔNG dán vào traefik.yml.
 #
-# NEW AI Markets OpenClaw flow. Does not replace PHHotel {hotelId}.phhotel.vn.
-#
-# DNS (Mắt Bão):
-#   openclaw.aimarkets.vn     A  → 72.62.72.165
-#   *.openclaw.aimarkets.vn   A  → 72.62.72.165   (host = *.openclaw)
-#
-# Host: {userId}.openclaw.aimarkets.vn  (userId = Mongo ObjectId 24 hex)
-# Same OpenClaw gateway port 8080 as PHHotel. Update service name if needed.
+# DNS Mắt Bão: openclaw + *.openclaw  A → 72.62.72.165
+# Upstream: đổi tên nếu docker ps khác (port 8080).
 
 http:
   routers:
-    openclaw-aimarkets-wildcard-http:
-      rule: "HostRegexp(`^[a-f0-9]{24}\\.openclaw\\.aimarkets\\.vn$`)"
-      entryPoints:
-        - web
-      service: openclaw-wildcard-svc
-      priority: 50
-
     openclaw-aimarkets-wildcard-https:
       rule: "HostRegexp(`^[a-f0-9]{24}\\.openclaw\\.aimarkets\\.vn$`)"
       entryPoints:
         - websecure
-      service: openclaw-wildcard-svc
+      service: openclaw-aimarkets-svc
       tls:
         certResolver: letsencrypt
       priority: 50
-
-    openclaw-aimarkets-shared-http:
-      rule: "Host(`openclaw.aimarkets.vn`)"
-      entryPoints:
-        - web
-      service: openclaw-wildcard-svc
-      priority: 200
 
     openclaw-aimarkets-shared-https:
       rule: "Host(`openclaw.aimarkets.vn`)"
       entryPoints:
         - websecure
-      service: openclaw-wildcard-svc
+      service: openclaw-aimarkets-svc
       tls:
         certResolver: letsencrypt
-        domains:
-          - main: "openclaw.aimarkets.vn"
       priority: 200
+
+  services:
+    openclaw-aimarkets-svc:
+      loadBalancer:
+        servers:
+          - url: "http://phhotel-openclaw-cexp1q:8080"
+        passHostHeader: true
