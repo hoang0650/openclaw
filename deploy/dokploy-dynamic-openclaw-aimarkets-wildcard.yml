@@ -1,8 +1,5 @@
-# Tuỳ chọn: file riêng nếu không muốn gộp vào openclaw-wildcard.yml
+# Optional standalone Aimarkets-only file (prefer combined openclaw-wildcard.yml).
 # Dokploy → dynamic/openclaw-aimarkets-wildcard.yml
-#
-# Khuyến nghị: dùng bản gộp trong dokploy-dynamic-openclaw-wildcard.yml
-# (2 service: openclaw-svc + openclaw-aimarkets-svc trong cùng 1 file).
 
 http:
   routers:

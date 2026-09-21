@@ -1,34 +1,34 @@
-# Paste → Dokploy → Traefik File System → dynamic/openclaw-wildcard.yml
-# (file bạn đang mở — thay toàn bộ nội dung, rồi Update)
-#
-# 2 service tách biệt:
-#   openclaw-svc           → PHHotel  (*.phhotel.vn, openclaw.phhotel.vn)
-#   openclaw-aimarkets-svc → AI Markets ({userId}.openclaw.aimarkets.vn, openclaw.aimarkets.vn)
-#
-# Cùng upstream container hiện tại (port 8080). Đổi URL nếu docker ps khác.
-# DNS Mắt Bão: * (phhotel) + openclaw + *.openclaw (aimarkets) → 72.62.72.165
+# Paste → Dokploy → dynamic/openclaw-wildcard.yml
+# TLS pattern = same as ai.aimarkets.vn (denglish): web + websecure, LE HTTP-01
+# DNS: * (phhotel) + openclaw + *.openclaw (aimarkets) → 72.62.72.165
 
 http:
   routers:
-    # ----- PHHotel -----
+    openclaw-tenant-http:
+      rule: "HostRegexp(`^[a-f0-9]{24}\\.phhotel\\.vn$`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: openclaw-svc
+      priority: 50
+
     openclaw-tenant-https:
       rule: "HostRegexp(`^[a-f0-9]{24}\\.phhotel\\.vn$`)"
       entryPoints:
         - websecure
       service: openclaw-svc
-      tls:
-        certResolver: letsencrypt
       priority: 50
-
-    openclaw-exact-https:
-      rule: "Host(`69d73f54e5302e4f720b66af.phhotel.vn`)"
-      entryPoints:
-        - websecure
-      service: openclaw-svc
       tls:
         certResolver: letsencrypt
-        domains:
-          - main: "69d73f54e5302e4f720b66af.phhotel.vn"
+
+    openclaw-shared-http:
+      rule: "Host(`openclaw.phhotel.vn`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: openclaw-svc
       priority: 200
 
     openclaw-shared-https:
@@ -36,32 +36,49 @@ http:
       entryPoints:
         - websecure
       service: openclaw-svc
+      priority: 200
       tls:
         certResolver: letsencrypt
         domains:
           - main: "openclaw.phhotel.vn"
-      priority: 200
 
-    # ----- AI Markets -----
+    openclaw-aimarkets-tenant-http:
+      rule: "HostRegexp(`^[a-f0-9]{24}\\.openclaw\\.aimarkets\\.vn$`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: openclaw-aimarkets-svc
+      priority: 50
+
     openclaw-aimarkets-tenant-https:
       rule: "HostRegexp(`^[a-f0-9]{24}\\.openclaw\\.aimarkets\\.vn$`)"
       entryPoints:
         - websecure
       service: openclaw-aimarkets-svc
+      priority: 50
       tls:
         certResolver: letsencrypt
-      priority: 50
+
+    openclaw-aimarkets-shared-http:
+      rule: "Host(`openclaw.aimarkets.vn`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: openclaw-aimarkets-svc
+      priority: 200
 
     openclaw-aimarkets-shared-https:
       rule: "Host(`openclaw.aimarkets.vn`)"
       entryPoints:
         - websecure
       service: openclaw-aimarkets-svc
+      priority: 200
       tls:
         certResolver: letsencrypt
         domains:
           - main: "openclaw.aimarkets.vn"
-      priority: 200
 
   services:
     openclaw-svc:
