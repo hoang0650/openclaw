@@ -98,11 +98,21 @@ OPENCLAW_PUBLIC_GATEWAY_URL=https://openclaw.phhotel.vn
 
 ## AI Markets — wildcard `{userId}.openclaw.aimarkets.vn` (luồng mới)
 
-Không thay Traefik PHHotel. Dán thêm file `dokploy-dynamic-openclaw-aimarkets-wildcard.yml` → `dynamic/openclaw-aimarkets-wildcard.yml`.
+**Cách 1 (khuyến nghị):** thay toàn bộ `dynamic/openclaw-wildcard.yml` bằng
+`dokploy-dynamic-openclaw-wildcard.yml` — **2 service** trong 1 file:
 
-File **phải có** `services.openclaw-aimarkets-svc` → `http://phhotel-openclaw-cexp1q:8080` (đổi tên nếu Dokploy khác). Thiếu `services:` → Traefik trả **404 page not found** khi Launch.
+| Service                  | Hosts                                                     |
+| ------------------------ | --------------------------------------------------------- |
+| `openclaw-svc`           | `{hotelId}.phhotel.vn`, `openclaw.phhotel.vn`             |
+| `openclaw-aimarkets-svc` | `{userId}.openclaw.aimarkets.vn`, `openclaw.aimarkets.vn` |
 
-TLS: subdomain `{userId}.openclaw…` cần cert `*.openclaw.aimarkets.vn` (DNS-01). HTTP-01 chỉ cover apex → Chrome **Không bảo mật**. Yml đã khai `tls.domains` + `sans` sẵn khi bật DNS challenge.
+Cả hai trỏ `http://phhotel-openclaw-cexp1q:8080` (đổi nếu tên container khác).
+
+**Cách 2:** giữ PHHotel trong `openclaw-wildcard.yml`, thêm file riêng
+`dokploy-dynamic-openclaw-aimarkets-wildcard.yml` → `openclaw-aimarkets-wildcard.yml`.
+
+Thiếu router/service aimarkets → Traefik **404 page not found** khi Launch.
+TLS subdomain cần DNS-01 `*.openclaw.aimarkets.vn`; HTTP-01 chỉ cover apex.
 
 DNS Mắt Bão:
 

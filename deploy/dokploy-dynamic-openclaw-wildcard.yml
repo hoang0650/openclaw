@@ -1,51 +1,77 @@
-# Paste vào Dokploy → Traefik File System → dynamic/openclaw-wildcard.yml
+# Paste → Dokploy → Traefik File System → dynamic/openclaw-wildcard.yml
+# (file bạn đang mở — thay toàn bộ nội dung, rồi Update)
 #
-# DNS Mat Bao: A record Host=* → IP VPS (72.62.72.165)
+# 2 service tách biệt:
+#   openclaw-svc           → PHHotel  (*.phhotel.vn, openclaw.phhotel.vn)
+#   openclaw-aimarkets-svc → AI Markets ({userId}.openclaw.aimarkets.vn, openclaw.aimarkets.vn)
 #
-# OpenClaw PHHotel chạy: node openclaw.mjs gateway --bind lan --port 8080
-# → Container Port / upstream LUÔN là 8080.
-#
-# Sửa hostname service cho khớp Docker:
-#   docker service ls   hoặc   docker ps --format "{{.Names}}"
-#
-# Không thêm *.phhotel.vn trong UI Domains.
-# Domain cụ thể (hotelId.phhotel.vn): Domains UI, Container Port = 8080.
+# Cùng upstream container hiện tại (port 8080). Đổi URL nếu docker ps khác.
+# DNS Mắt Bão: * (phhotel) + openclaw + *.openclaw (aimarkets) → 72.62.72.165
 
 http:
   routers:
-    # Chỉ hotelId = Mongo ObjectId (24 hex). KHÔNG dùng ^[a-z0-9]+ — sẽ nuốt ai/api/app.
-    openclaw-wildcard-http:
-      rule: "HostRegexp(`^[a-f0-9]{24}\\.phhotel\\.vn$`)"
-      entryPoints:
-        - web
-      service: openclaw-wildcard-svc
-      priority: 50
-
-    openclaw-wildcard-https:
+    # ----- PHHotel -----
+    openclaw-tenant-https:
       rule: "HostRegexp(`^[a-f0-9]{24}\\.phhotel\\.vn$`)"
       entryPoints:
         - websecure
-      service: openclaw-wildcard-svc
+      service: openclaw-svc
       tls:
         certResolver: letsencrypt
       priority: 50
 
-    # Shared gateway hostname (PHGroup-AI OPENCLAW_GATEWAY_URL)
+    openclaw-exact-https:
+      rule: "Host(`69d73f54e5302e4f720b66af.phhotel.vn`)"
+      entryPoints:
+        - websecure
+      service: openclaw-svc
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "69d73f54e5302e4f720b66af.phhotel.vn"
+      priority: 200
+
     openclaw-shared-https:
       rule: "Host(`openclaw.phhotel.vn`)"
       entryPoints:
         - websecure
-      service: openclaw-wildcard-svc
+      service: openclaw-svc
       tls:
         certResolver: letsencrypt
         domains:
           - main: "openclaw.phhotel.vn"
       priority: 200
 
+    # ----- AI Markets -----
+    openclaw-aimarkets-tenant-https:
+      rule: "HostRegexp(`^[a-f0-9]{24}\\.openclaw\\.aimarkets\\.vn$`)"
+      entryPoints:
+        - websecure
+      service: openclaw-aimarkets-svc
+      tls:
+        certResolver: letsencrypt
+      priority: 50
+
+    openclaw-aimarkets-shared-https:
+      rule: "Host(`openclaw.aimarkets.vn`)"
+      entryPoints:
+        - websecure
+      service: openclaw-aimarkets-svc
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "openclaw.aimarkets.vn"
+      priority: 200
+
   services:
-    openclaw-wildcard-svc:
+    openclaw-svc:
       loadBalancer:
         servers:
-          # Port cố định 8080 — chỉ đổi phần tên service nếu khác
+          - url: "http://phhotel-openclaw-cexp1q:8080"
+        passHostHeader: true
+
+    openclaw-aimarkets-svc:
+      loadBalancer:
+        servers:
           - url: "http://phhotel-openclaw-cexp1q:8080"
         passHostHeader: true

@@ -1,13 +1,12 @@
-# Dokploy → Traefik File System → mở folder dynamic → tạo file mới
-#   openclaw-aimarkets-wildcard.yml
-# KHÔNG dán vào traefik.yml.
+# Tuỳ chọn: file riêng nếu không muốn gộp vào openclaw-wildcard.yml
+# Dokploy → dynamic/openclaw-aimarkets-wildcard.yml
 #
-# DNS Mắt Bão: openclaw + *.openclaw  A → 72.62.72.165
-# Upstream: đổi tên nếu docker ps khác (port 8080).
+# Khuyến nghị: dùng bản gộp trong dokploy-dynamic-openclaw-wildcard.yml
+# (2 service: openclaw-svc + openclaw-aimarkets-svc trong cùng 1 file).
 
 http:
   routers:
-    openclaw-aimarkets-wildcard-https:
+    openclaw-aimarkets-tenant-https:
       rule: "HostRegexp(`^[a-f0-9]{24}\\.openclaw\\.aimarkets\\.vn$`)"
       entryPoints:
         - websecure
@@ -23,6 +22,8 @@ http:
       service: openclaw-aimarkets-svc
       tls:
         certResolver: letsencrypt
+        domains:
+          - main: "openclaw.aimarkets.vn"
       priority: 200
 
   services:
