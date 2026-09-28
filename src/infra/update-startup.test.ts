@@ -713,6 +713,25 @@ describe("update-startup", () => {
     await expectPathMissing(path.join(tempDir, "update-check.json"));
   });
 
+  it("skips update check when OPENCLAW_NO_UPDATE_CHECK is set", async () => {
+    const log = { info: vi.fn() };
+    vi.stubEnv("OPENCLAW_NO_UPDATE_CHECK", "1");
+    try {
+      await runGatewayUpdateCheck({
+        cfg: {},
+        log,
+        isNixMode: false,
+        allowInTests: true,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(log.info).not.toHaveBeenCalled();
+    expect(readPersistedUpdateCheckState()).toBeNull();
+    expect(getUpdateAvailable()).toBeNull();
+  });
+
   it("discovers and deduplicates an exact extended-stable update without auto-applying", async () => {
     const onUpdateAvailableChange = vi.fn();
     const runAutoUpdate = createAutoUpdateSuccessMock();

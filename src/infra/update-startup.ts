@@ -541,7 +541,9 @@ export async function runGatewayUpdateCheck(params: {
   const isAutoUpdateChannel = configuredChannel === "stable" || configuredChannel === "beta";
   const shouldRunAutoUpdate =
     isAutoUpdateChannel && auto.enabled && !autoDisabledByEnv && !autoDisabledByExternalSupervisor;
-  const shouldRunUpdateHints = params.cfg.update?.checkOnStart !== false;
+  // Image-based installs (Docker) cannot self-update: update.run returns not-git-install.
+  const hintsDisabledByEnv = isTruthyEnvValue(process.env.OPENCLAW_NO_UPDATE_CHECK);
+  const shouldRunUpdateHints = params.cfg.update?.checkOnStart !== false && !hintsDisabledByEnv;
   if (!shouldRunUpdateHints && !shouldRunAutoUpdate) {
     if (configuredChannel === "extended-stable") {
       setUpdateAvailableCache({

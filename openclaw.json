@@ -1,4 +1,7 @@
 {
+  "update": {
+    "checkOnStart": false
+  },
   "gateway": {
     "mode": "local",
     "bind": "lan",

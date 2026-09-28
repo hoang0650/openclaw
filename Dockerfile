@@ -363,6 +363,9 @@ RUN install -d -m 0755 -o node -g node /home/node/.config && \
     stat -c '%U:%G %a' /home/node/.config/openclaw | grep -qx 'node:node 700'
 
 ENV NODE_ENV=production
+# Container images are updated by redeploying, never in place.
+ENV OPENCLAW_NO_UPDATE_CHECK=1 \
+    OPENCLAW_NO_AUTO_UPDATE=1
 
 # Security hardening: Run as non-root user
 # The node:24-bookworm image includes a 'node' user (uid 1000)
