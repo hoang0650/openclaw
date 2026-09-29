@@ -2,6 +2,7 @@
 import { html, nothing } from "lit";
 import type { UpdateAvailable } from "../api/types.ts";
 import {
+  AIMARKETS_SETTINGS_ROUTES,
   cancelRoutePreload,
   navigationIconForRoute,
   scheduleRoutePreload,
@@ -15,6 +16,7 @@ import {
   type SettingsSearchBlock,
 } from "../app-navigation.ts";
 import { pathForRoute, type RouteId } from "../app-route-paths.ts";
+import { resolveOpenClawAudience } from "../app/audience-models.ts";
 import type { ApplicationNavigationOptions } from "../app/context.ts";
 import { t } from "../i18n/index.ts";
 import { normalizeLowercaseStringOrEmpty } from "../lib/string-coerce.ts";
@@ -70,18 +72,34 @@ function isRedundantRouteBlock(routeId: RouteId, block: SettingsSearchBlock): bo
   );
 }
 
+function settingsNavigationGroupsForAudience(): readonly {
+  labelKey: string | null;
+  routes: readonly RouteId[];
+}[] {
+  if (resolveOpenClawAudience() !== "aimarkets") {
+    return SETTINGS_NAVIGATION_GROUPS;
+  }
+  return SETTINGS_NAVIGATION_GROUPS.map((group) => {
+    const extra = AIMARKETS_SETTINGS_ROUTES.filter(
+      (entry) => entry.groupLabelKey === group.labelKey,
+    ).map((entry) => entry.routeId);
+    return extra.length > 0 ? { ...group, routes: [...group.routes, ...extra] } : group;
+  });
+}
+
 function filterSettingsNavigationGroups(
   searchQuery: string,
   blockMatches: readonly SettingsSearchBlock[],
 ): readonly SettingsNavigationGroupView[] {
   const query = normalizeLowercaseStringOrEmpty(searchQuery);
+  const navigationGroups = settingsNavigationGroupsForAudience();
   if (!query) {
-    return SETTINGS_NAVIGATION_GROUPS.map((group) => ({
+    return navigationGroups.map((group) => ({
       labelKey: group.labelKey,
       items: group.routes.map((routeId) => ({ routeId, blocks: [] })),
     }));
   }
-  const sidebarRoutes = SETTINGS_NAVIGATION_GROUPS.flatMap((group) => group.routes);
+  const sidebarRoutes = navigationGroups.flatMap((group) => group.routes);
   const searchableRoutes = [
     ...new Set([
       ...sidebarRoutes,
@@ -97,7 +115,7 @@ function filterSettingsNavigationGroups(
     ].some((value) => settingsSearchTextMatches(value, query)),
   );
   const includedRoutes = new Set<RouteId>(directRoutes);
-  const groupRoutes = SETTINGS_NAVIGATION_GROUPS.flatMap((group) => {
+  const groupRoutes = navigationGroups.flatMap((group) => {
     const groupMatches = group.labelKey && settingsSearchTextMatches(t(group.labelKey), query);
     if (!groupMatches) {
       return [];

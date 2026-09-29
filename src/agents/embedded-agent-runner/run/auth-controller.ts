@@ -37,6 +37,10 @@ import {
 } from "../../provider-secret-egress.js";
 import { clampRuntimeAuthRefreshDelayMs } from "../../runtime-auth-refresh.js";
 import {
+  hasSessionCredentialResolvers,
+  resolveSessionCredential,
+} from "../../session-credential-resolver.js";
+import {
   RUNTIME_AUTH_REFRESH_MARGIN_MS,
   RUNTIME_AUTH_REFRESH_MIN_DELAY_MS,
   RUNTIME_AUTH_REFRESH_RETRY_MS,
@@ -99,6 +103,7 @@ export function createEmbeddedRunAuthController(params: {
   workspaceDir: string;
   authStore: AuthProfileStore;
   authStorage: RuntimeApiKeySink;
+  sessionKey?: string;
   profileCandidates: Array<string | undefined>;
   lockedProfileId?: string;
   initialThinkLevel: ThinkLevel;
@@ -456,8 +461,49 @@ export function createEmbeddedRunAuthController(params: {
     });
   };
 
+  const applySessionCredential = async (
+    preparedModel:
+      | Awaited<ReturnType<NonNullable<typeof params.prepareModelForAuthProfile>>>
+      | undefined,
+  ): Promise<boolean> => {
+    const sessionKey = params.sessionKey?.trim();
+    if (!sessionKey || !hasSessionCredentialResolvers()) {
+      return false;
+    }
+    const candidateModel = preparedModel?.runtimeModel ?? params.getRuntimeModel();
+    const override = await resolveSessionCredential({
+      sessionKey,
+      provider: candidateModel.provider,
+      modelId: params.getModelId(),
+    });
+    if (!override) {
+      return false;
+    }
+    commitPreparedModel(preparedModel);
+    const withOverrides = (model: Model): Model => ({
+      ...model,
+      ...(override.baseUrl ? { baseUrl: override.baseUrl } : {}),
+      ...(override.modelId ? { id: override.modelId } : {}),
+    });
+    params.setRuntimeModel(withOverrides(params.getRuntimeModel()));
+    params.setEffectiveModel(withOverrides(params.getEffectiveModel()));
+    clearRuntimeAuthRefreshTimer();
+    params.setApiKeyInfo({
+      apiKey: override.apiKey,
+      mode: "api-key",
+      source: override.source ?? "session-credential",
+    });
+    params.authStorage.setRuntimeApiKey(candidateModel.provider, override.apiKey);
+    params.setRuntimeAuthState(null);
+    params.setLastProfileId(undefined);
+    return true;
+  };
+
   const applyApiKeyInfo = async (candidate?: string, attemptIndex?: number): Promise<void> => {
     const preparedModel = await params.prepareModelForAuthProfile?.(candidate, attemptIndex);
+    if (await applySessionCredential(preparedModel)) {
+      return;
+    }
     const apiKeyInfo = await resolveApiKeyForCandidate(
       candidate,
       preparedModel?.runtimeModel,

@@ -90,20 +90,31 @@ export function isAimarketsModelEntry(entry: {
   return id.startsWith("openrouter/") || id.includes(":free") || alias.includes("or-");
 }
 
+/** Buyer-key models: the gateway has no platform credential for them by design. */
+export function isAimarketsByokModelEntry(entry: { alias?: string }): boolean {
+  return String(entry.alias || "")
+    .toLowerCase()
+    .startsWith("aimarkets-byok-");
+}
+
 /**
  * Filter gateway models.list for the current product surface.
- * - aimarkets: hide PHHotel Nest stack; prefer aimarkets-* / openrouter free
+ * - aimarkets: hide PHHotel Nest stack; prefer aimarkets-* / openrouter free.
+ *   BYOK models stay selectable even though the gateway reports them as
+ *   unavailable (the buyer's own key is injected per run).
  * - phhotel: hide aimarkets-* aliases
  */
-export function filterModelsForAudience<T extends { id?: string; alias?: string; name?: string }>(
-  models: T[],
-  audience: OpenClawAudience = resolveOpenClawAudience(),
-): T[] {
+export function filterModelsForAudience<
+  T extends { id?: string; alias?: string; name?: string; available?: boolean },
+>(models: T[], audience: OpenClawAudience = resolveOpenClawAudience()): T[] {
   if (!Array.isArray(models) || models.length === 0) return models;
   if (audience === "aimarkets") {
     const withoutHotel = models.filter((m) => !isPhhotelModelEntry(m));
     const aimarketsOnly = withoutHotel.filter((m) => isAimarketsModelEntry(m));
-    return aimarketsOnly.length > 0 ? aimarketsOnly : withoutHotel;
+    const visible = aimarketsOnly.length > 0 ? aimarketsOnly : withoutHotel;
+    return visible.map((m) =>
+      m.available === false && isAimarketsByokModelEntry(m) ? { ...m, available: true } : m,
+    );
   }
   if (audience === "phhotel") {
     return models.filter((m) => {

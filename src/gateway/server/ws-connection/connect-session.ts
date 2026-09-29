@@ -31,6 +31,7 @@ import {
 } from "../../../utils/message-channel.js";
 import { resolveRuntimeServiceVersion } from "../../../version.js";
 import { verifyAgentRuntimeIdentityToken } from "../../agent-runtime-identity-token.js";
+import { resolveAimarketsUserIdFromUpgrade } from "../../aimarkets-ticket.js";
 import { APPROVALS_SCOPE } from "../../method-scopes.js";
 import { serializeEventPayload } from "../../node-registry.js";
 import { isOperatorApprovalRuntimeToken } from "../../operator-approval-runtime-token.js";
@@ -301,6 +302,7 @@ export async function attachAuthenticatedGatewayConnect(
     );
   }
   clearHandshakeTimer();
+  const aimarketsUserId = resolveAimarketsUserIdFromUpgrade(context.handler.upgradeReq);
   const nextClient: GatewayWsClient = {
     socket,
     connect: state.controlUiDeviceAuthMigrationPending
@@ -321,6 +323,7 @@ export async function attachAuthenticatedGatewayConnect(
     sharedGatewaySessionGeneration: sessionSharedGatewaySessionGeneration,
     presenceKey,
     ...(authenticatedUserId ? { authenticatedUserId } : {}),
+    ...(aimarketsUserId ? { aimarketsUserId } : {}),
     ...(authenticatedUserIsTailscaleProvider ? { authenticatedUserIsTailscaleProvider: true } : {}),
     ...(authenticatedUserProfile ? { authenticatedUserProfile } : {}),
     clientIp: reportedClientIp,

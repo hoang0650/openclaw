@@ -318,6 +318,7 @@ export async function prepareEmbeddedRunRuntime(input: {
     workspaceDir: input.workspaceDir,
     authStore: attemptAuthProfileStore,
     authStorage,
+    sessionKey: params.sessionKey,
     profileCandidates,
     lockedProfileId,
     initialThinkLevel,

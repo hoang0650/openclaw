@@ -54,6 +54,12 @@ jobs:
           echo "image=$(echo '${{ env.IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
           echo "sha=$(echo $GITHUB_SHA | head -c 7)" >> "$GITHUB_OUTPUT"
           echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          # Only main publishes :latest (what Dokploy pulls); other refs get a branch tag.
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            echo "channel=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=branch-$(echo "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' | tr '/' '-' | tr -cd 'a-z0-9._-' | head -c 60)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -65,7 +71,7 @@ jobs:
             GIT_COMMIT=${{ github.sha }}
             OPENCLAW_BUILD_TIMESTAMP=${{ steps.meta.outputs.ts }}
           tags: |
-            ${{ steps.meta.outputs.image }}:latest
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.channel }}
             ${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
@@ -76,5 +82,5 @@ jobs:
       - name: Trigger Dokploy redeploy
         env:
           DOKPLOY_WEBHOOK_URL: ${{ secrets.DOKPLOY_WEBHOOK_URL }}
-        if: env.DOKPLOY_WEBHOOK_URL != ''
+        if: env.DOKPLOY_WEBHOOK_URL != '' && github.ref == 'refs/heads/main'
         run: curl -fsS -X POST "$DOKPLOY_WEBHOOK_URL" || echo "::warning::Dokploy webhook failed; redeploy manually in Dokploy."

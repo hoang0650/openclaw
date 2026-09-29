@@ -4,7 +4,7 @@
     "onStartup": true
   },
   "name": "AI Markets OpenClaw Usage",
-  "description": "Charge AI Markets wallet for OpenClaw LLM usage (provider COGS + 25% markup). Skips PHHotel sessions.",
+  "description": "AI Markets policy: buyer-owned provider API keys (BYOK, no token fee), free OpenRouter trial models, usage reporting. Skips PHHotel sessions.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

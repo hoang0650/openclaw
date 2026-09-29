@@ -1,5 +1,6 @@
 // Control UI startup settings resolve native auth handoff and URL parameters.
 import { normalizeOptionalString } from "../lib/string-coerce.ts";
+import { storeAimarketsTicket, syncAimarketsTicketCookie } from "./aimarkets-ticket.ts";
 import type { UiSettings } from "./settings.ts";
 
 type ApplicationStartupLocation = {
@@ -218,6 +219,7 @@ export function resolveApplicationStartupSettings(
   }
 
   if (!location.search && !location.hash) {
+    syncAimarketsTicketCookie();
     return {
       settings,
       password,
@@ -476,6 +478,15 @@ export function resolveApplicationStartupSettings(
       } catch {
         // ignore
       }
+    }
+    const marketTicket = readParam(params, hashParams, "marketTicket");
+    if (marketTicket != null) {
+      storeAimarketsTicket(marketTicket);
+      params.delete("marketTicket");
+      hashParams.delete("marketTicket");
+      shouldCleanUrl = true;
+    } else {
+      syncAimarketsTicketCookie(resolvedMarketUserId);
     }
     if (resolvedMarketUserId) {
       if (

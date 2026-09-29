@@ -193,6 +193,29 @@
             "contextWindow": 131072,
             "maxTokens": 8192,
             "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+          },
+          {
+            "id": "openrouter/auto",
+            "name": "OpenRouter Auto (your OpenRouter key)",
+            "input": ["text", "image"],
+            "reasoning": true,
+            "contextWindow": 200000,
+            "maxTokens": 16384
+          }
+        ]
+      },
+      "byok-custom": {
+        "baseUrl": "https://byok.invalid/v1",
+        "apiKey": "byok-user-key-required",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "custom",
+            "name": "Custom OpenAI-compatible (your key + base URL)",
+            "input": ["text"],
+            "reasoning": false,
+            "contextWindow": 128000,
+            "maxTokens": 8192
           }
         ]
       }
@@ -237,6 +260,51 @@
         },
         "openrouter/cohere/north-mini-code:free": {
           "alias": "aimarkets-or-north"
+        },
+        "openai/gpt-5.6": {
+          "alias": "aimarkets-byok-openai"
+        },
+        "openai/gpt-5.4-mini": {
+          "alias": "aimarkets-byok-openai-mini"
+        },
+        "anthropic/claude-sonnet-5": {
+          "alias": "aimarkets-byok-claude-sonnet"
+        },
+        "anthropic/claude-opus-5": {
+          "alias": "aimarkets-byok-claude-opus"
+        },
+        "anthropic/claude-haiku-4-5": {
+          "alias": "aimarkets-byok-claude-haiku"
+        },
+        "google/gemini-3.1-pro-preview": {
+          "alias": "aimarkets-byok-gemini-pro"
+        },
+        "google/gemini-3-flash-preview": {
+          "alias": "aimarkets-byok-gemini-flash"
+        },
+        "openrouter/openrouter/auto": {
+          "alias": "aimarkets-byok-openrouter-auto"
+        },
+        "deepseek/deepseek-v4-pro": {
+          "alias": "aimarkets-byok-deepseek-pro"
+        },
+        "deepseek/deepseek-v4-flash": {
+          "alias": "aimarkets-byok-deepseek-flash"
+        },
+        "groq/llama-3.3-70b-versatile": {
+          "alias": "aimarkets-byok-groq-llama"
+        },
+        "groq/openai/gpt-oss-120b": {
+          "alias": "aimarkets-byok-groq-gpt-oss"
+        },
+        "xai/grok-4.3": {
+          "alias": "aimarkets-byok-grok"
+        },
+        "mistral/mistral-large-latest": {
+          "alias": "aimarkets-byok-mistral-large"
+        },
+        "byok-custom/custom": {
+          "alias": "aimarkets-byok-custom"
         }
       }
     }

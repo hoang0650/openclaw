@@ -37,6 +37,8 @@ export type GatewayWsClient = PluginNodeCapabilityClient & {
   sharedGatewaySessionGeneration?: string;
   presenceKey?: string;
   authenticatedUserId?: string;
+  /** AI Markets buyer id verified from the signed `aimt` launch ticket cookie. */
+  aimarketsUserId?: string;
   /** Verified Tailscale provider identity; generic proxy identities must not infer this. */
   authenticatedUserIsTailscaleProvider?: boolean;
   authenticatedUserProfile?: {

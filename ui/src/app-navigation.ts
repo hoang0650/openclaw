@@ -204,7 +204,15 @@ const SETTINGS_SUBPAGE_ROUTES: readonly NavigationRouteId[] = [
   "ai-agents",
   "model-setup",
   "lobsterdex",
+  "my-api-keys",
 ];
+
+// Audience-specific sidebar entries appended to an existing group. AI Markets
+// buyers bring their own provider keys; other surfaces never show the page.
+export const AIMARKETS_SETTINGS_ROUTES: readonly {
+  groupLabelKey: string;
+  routeId: NavigationRouteId;
+}[] = [{ groupLabelKey: "nav.settingsGroupAgents", routeId: "my-api-keys" }];
 export const SETTINGS_SEARCHABLE_SUBPAGE_ROUTES: readonly NavigationRouteId[] = ["ai-agents"];
 const SETTINGS_SUBPAGE_OWNER_ROUTES: Partial<
   Readonly<Record<NavigationRouteId, NavigationRouteId>>
@@ -254,6 +262,7 @@ const NAVIGATION_ICONS: NavigationItem = {
   "ai-agents": "brain",
   "model-setup": "spark",
   "model-providers": "plug",
+  "my-api-keys": "key",
   "memory-import": "download",
   notifications: "bell",
   security: "shieldCheck",
@@ -369,6 +378,7 @@ const NAVIGATION_COPY: Record<NavigationRouteId, { titleKey: string; subtitleKey
     titleKey: "routeTitles.modelProviders",
     subtitleKey: "subtitles.modelProviders",
   },
+  "my-api-keys": { titleKey: "tabs.myApiKeys", subtitleKey: "subtitles.myApiKeys" },
   "memory-import": { titleKey: "tabs.memoryImport", subtitleKey: "subtitles.memoryImport" },
   notifications: {
     titleKey: "routeTitles.notifications",

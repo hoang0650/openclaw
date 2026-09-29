@@ -61,6 +61,8 @@ export function buildControlUiCspHeader(opts?: {
     "data:",
     "https://api.openai.com",
     "https://tweakcn.com",
+    // AI Markets buyer key vault (My API keys page).
+    "https://api.aimarkets.vn",
   ];
   return [
     "default-src 'self'",

@@ -36,6 +36,7 @@ import { page as logsPage } from "./pages/logs/route.ts";
 import { page as memoryImportPage } from "./pages/memory-import/route.ts";
 import { page as modelProvidersPage } from "./pages/model-providers/route.ts";
 import { page as modelSetupPage } from "./pages/model-setup/route.ts";
+import { page as myApiKeysPage } from "./pages/my-api-keys/route.ts";
 import { page as newSessionPage } from "./pages/new-session/route.ts";
 import { page as nodesPage } from "./pages/nodes/route.ts";
 import { page as pluginPage } from "./pages/plugin/route.ts";
@@ -78,6 +79,7 @@ const APP_ROUTE_TREE = [
   ...configPages,
   modelSetupPage,
   modelProvidersPage,
+  myApiKeysPage,
   memoryImportPage,
   profilePage,
   workboardPage,

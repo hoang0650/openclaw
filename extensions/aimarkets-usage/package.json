@@ -2,7 +2,7 @@
   "name": "@openclaw/aimarkets-usage",
   "version": "2026.9.20",
   "private": true,
-  "description": "Bill AI Markets wallet for OpenClaw LLM usage (provider + 25%)",
+  "description": "AI Markets BYOK policy and usage reporting for OpenClaw",
   "type": "module",
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*"
