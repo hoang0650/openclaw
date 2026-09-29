@@ -21,6 +21,8 @@ PRODUCTS = (
     ("hermes", "hermes-aimarkets-svc"),
     ("nanoclaw", "nanoclaw-aimarkets-svc"),
     ("openclaw", "openclaw-aimarkets-svc"),
+    ("openwebui", "openwebui-aimarkets-svc"),
+    ("paperclip", "paperclip-aimarkets-svc"),
 )
 
 
