@@ -16,7 +16,6 @@ export const BYOK_PROVIDER_IDS = new Set([
   "deepseek",
   "groq",
   "xai",
-  "mistral",
   "byok-custom",
 ]);
 

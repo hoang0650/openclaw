@@ -34,7 +34,6 @@ export const BYOK_PROVIDER_MODELS: Readonly<Record<string, readonly string[]>> =
   deepseek: ["aimarkets-byok-deepseek-pro", "aimarkets-byok-deepseek-flash"],
   groq: ["aimarkets-byok-groq-llama", "aimarkets-byok-groq-gpt-oss"],
   xai: ["aimarkets-byok-grok"],
-  mistral: ["aimarkets-byok-mistral-large"],
   "byok-custom": ["aimarkets-byok-custom"],
 };
 

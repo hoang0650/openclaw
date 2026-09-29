@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AI Markets OpenClaw usage policy.
  *
  * AI Markets sells agents only: buyers bring their own provider API keys
@@ -58,7 +58,6 @@ function providerLabel(provider: string): string {
     deepseek: "DeepSeek",
     groq: "Groq",
     xai: "xAI",
-    mistral: "Mistral",
     [BYOK_CUSTOM_PROVIDER_ID]: "Custom (OpenAI-compatible)",
   };
   return labels[provider] || provider;

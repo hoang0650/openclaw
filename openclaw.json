@@ -300,9 +300,6 @@
         "xai/grok-4.3": {
           "alias": "aimarkets-byok-grok"
         },
-        "mistral/mistral-large-latest": {
-          "alias": "aimarkets-byok-mistral-large"
-        },
         "byok-custom/custom": {
           "alias": "aimarkets-byok-custom"
         }
