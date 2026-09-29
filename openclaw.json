@@ -262,10 +262,12 @@
           "alias": "aimarkets-or-north"
         },
         "openai/gpt-5.6": {
-          "alias": "aimarkets-byok-openai"
+          "alias": "aimarkets-byok-openai",
+          "agentRuntime": { "id": "openclaw" }
         },
         "openai/gpt-5.4-mini": {
-          "alias": "aimarkets-byok-openai-mini"
+          "alias": "aimarkets-byok-openai-mini",
+          "agentRuntime": { "id": "openclaw" }
         },
         "anthropic/claude-sonnet-5": {
           "alias": "aimarkets-byok-claude-sonnet"
