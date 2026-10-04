@@ -49,6 +49,36 @@ export function isAimarketsTicketEnforced(): boolean {
   return Boolean(readEnv("OPENCLAW_MARKET_TICKET_SECRET"));
 }
 
+/**
+ * Shared-secret token for AI Markets Control UI connections, derived from the
+ * AI Markets secrets so buyers never receive the gateway token PHHotel uses.
+ * ai-marketplace-api derives the same value (src/utils/openclaw-ticket.js).
+ * Empty unless both secrets are set.
+ */
+export function resolveAimarketsGatewayToken(): string {
+  const serviceSecret = readEnv("AIMARKETS_SERVICE_SECRET");
+  const ticketSecret = readEnv("OPENCLAW_MARKET_TICKET_SECRET");
+  if (!serviceSecret || !ticketSecret) {
+    return "";
+  }
+  return createHmac("sha256", ticketSecret)
+    .update(`aimarkets-openclaw-gateway:v1:${serviceSecret}`, "utf8")
+    .digest("hex")
+    .slice(0, 48);
+}
+
+/** True for `openclaw.aimarkets.vn` and `{userId}.openclaw.aimarkets.vn` (port ignored). */
+export function isAimarketsHost(host: string | undefined): boolean {
+  const suffix = (
+    readEnv("OPENCLAW_AIMARKETS_HOST_SUFFIX") || "openclaw.aimarkets.vn"
+  ).toLowerCase();
+  const hostname = String(host ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/:\d+$/, "");
+  return hostname === suffix || hostname.endsWith(`.${suffix}`);
+}
+
 function sign(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(`aimt.v1.${payload}`, "utf8").digest("base64url");
 }

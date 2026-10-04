@@ -8,6 +8,7 @@ import {
 import type { GatewayAuthConfig, GatewayTrustedProxyConfig } from "../config/types.gateway.js";
 import { readTailscaleWhoisIdentity, type TailscaleWhoisIdentity } from "../infra/tailscale.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
+import { isAimarketsHost, resolveAimarketsGatewayToken } from "./aimarkets-ticket.js";
 import {
   AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET,
   type AuthRateLimiter,
@@ -579,6 +580,19 @@ async function authorizeGatewayConnectCore(
   }
 
   if (auth.mode === "token") {
+    // One gateway serves PHHotel and AI Markets: AI Markets hosts also accept
+    // the token derived from the AI Markets secrets.
+    const aimarketsToken = isAimarketsHost(headerValue(req?.headers?.host))
+      ? resolveAimarketsGatewayToken()
+      : "";
+    if (
+      aimarketsToken &&
+      connectAuth?.token &&
+      safeEqualSecret(connectAuth.token, aimarketsToken)
+    ) {
+      limiter?.reset(ip, rateLimitScope);
+      return { ok: true, method: "token" };
+    }
     return await authorizeTokenAuth({
       authToken: auth.token,
       connectToken: connectAuth?.token,

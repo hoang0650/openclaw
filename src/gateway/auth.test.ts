@@ -301,6 +301,39 @@ describe("gateway auth", () => {
     expect(mismatch.reason).toBe("token_mismatch");
   });
 
+  it("accepts the AI Markets derived token on AI Markets hosts only", async () => {
+    vi.stubEnv("AIMARKETS_SERVICE_SECRET", "service-secret"); // pragma: allowlist secret
+    vi.stubEnv("OPENCLAW_MARKET_TICKET_SECRET", "ticket-secret"); // pragma: allowlist secret
+    vi.stubEnv("OPENCLAW_AIMARKETS_HOST_SUFFIX", "");
+    const marketToken = "d2acf1f3372abe6942578a088ea811b39e1f14f85dabf74b";
+    const auth = { mode: "token" as const, token: "secret", allowTailscale: false };
+    const reqFor = (host: string) => ({ headers: { host } }) as never;
+    try {
+      const market = await authorizeHttpGatewayConnect({
+        auth,
+        connectAuth: { token: marketToken },
+        req: reqFor("0123456789abcdef01234567.openclaw.aimarkets.vn"),
+      });
+      expect(market).toMatchObject({ ok: true, method: "token" });
+
+      const otherHost = await authorizeHttpGatewayConnect({
+        auth,
+        connectAuth: { token: marketToken },
+        req: reqFor("hotel1.phhotel.vn"),
+      });
+      expect(otherHost).toMatchObject({ ok: false, reason: "token_mismatch" });
+
+      const shared = await authorizeHttpGatewayConnect({
+        auth,
+        connectAuth: { token: "secret" },
+        req: reqFor("0123456789abcdef01234567.openclaw.aimarkets.vn"),
+      });
+      expect(shared).toMatchObject({ ok: true, method: "token" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("reports missing token config reason", async () => {
     const res = await authorizeHttpGatewayConnect({
       auth: { mode: "token", allowTailscale: false },

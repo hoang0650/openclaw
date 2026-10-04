@@ -137,6 +137,7 @@ OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
 AI_URL=https://ai.aimarkets.vn
 AIMARKETS_API_URL=https://api.aimarkets.vn
 AIMARKETS_SERVICE_SECRET=<shared with openclaw aimarkets-usage plugin>
+OPENCLAW_MARKET_TICKET_SECRET=<min-32-chars, same on OpenClaw gateway>
 OPENCLAW_AIMARKETS_MARKUP=0.25
 ```
 
@@ -147,9 +148,12 @@ FEATHERLESS_API_KEY=...
 OPENROUTER_API_KEY=...
 AIMARKETS_API_URL=https://api.aimarkets.vn
 AIMARKETS_SERVICE_SECRET=<same as API>
+OPENCLAW_MARKET_TICKET_SECRET=<same as API>
 # Ponytail coding rules (shared service, see ponytail/deploy/DOKPLOY.md)
 PONYTAIL_URL=http://aimarketplace-ponytail:8787
 PONYTAIL_MODE=compact
 ```
+
+**Gateway token AI Markets:** gateway dùng chung cho PHHotel và AI Markets. `OPENCLAW_GATEWAY_TOKEN` giữ nguyên cho PHHotel (cùng giá trị PHGroup-AI). Trên host `*.openclaw.aimarkets.vn` gateway nhận thêm token suy ra `HMAC-SHA256(OPENCLAW_MARKET_TICKET_SECRET, "aimarkets-openclaw-gateway:v1:" + AIMARKETS_SERVICE_SECRET)` (48 ký tự hex đầu); API tự tính cùng giá trị và gắn vào URL "Mở agent", nên token PHHotel không lộ cho người mua. Đặt `OPENCLAW_MARKET_TICKET_SECRET` cũng bật kiểm tra market ticket. Đổi hậu tố host bằng `OPENCLAW_AIMARKETS_HOST_SUFFIX` (mặc định `openclaw.aimarkets.vn`).
 
 **Models:** PHHotel Nest stack (`phhotel-main` / DeepSeek Flash / Qwen / MiniMax) stays on `{hotelId}.phhotel.vn`. AI Markets Control UI only lists `aimarkets-*` OpenRouter/Featherless catalog; usage is billed to the buyer wallet at **provider COGS + 25%**.

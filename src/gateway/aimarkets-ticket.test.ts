@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   checkAimarketsSessionAccess,
   collectMarketSessionUserIds,
+  isAimarketsHost,
   isAimarketsTicketEnforced,
+  resolveAimarketsGatewayToken,
   resolveAimarketsUserIdFromUpgrade,
   verifyAimarketsTicket,
 } from "./aimarkets-ticket.js";
@@ -17,6 +19,7 @@ const ENV_KEYS = [
   "NEST_SERVICE_AUTH_SECRET",
   "PYTHON_AI_SHARED_SECRET",
   "OPENCLAW_AIMARKETS_TICKET_ENFORCE",
+  "OPENCLAW_AIMARKETS_HOST_SUFFIX",
 ] as const;
 
 function issue(uid: string, exp: number, secret = SECRET): string {
@@ -96,5 +99,25 @@ describe("aimarkets ticket", () => {
     expect(
       checkAimarketsSessionAccess({ requestParams: { key: "main" }, clientUserId: undefined }),
     ).toBeNull();
+  });
+
+  it("derives the AI Markets gateway token only from both AI Markets secrets", () => {
+    expect(resolveAimarketsGatewayToken()).toBe("");
+    process.env.AIMARKETS_SERVICE_SECRET = "service-secret"; // pragma: allowlist secret
+    process.env.OPENCLAW_MARKET_TICKET_SECRET = "ticket-secret"; // pragma: allowlist secret
+    // Same vector as ai-marketplace-api test/openclaw-ticket.test.js.
+    expect(resolveAimarketsGatewayToken()).toBe("d2acf1f3372abe6942578a088ea811b39e1f14f85dabf74b");
+    delete process.env.OPENCLAW_MARKET_TICKET_SECRET;
+    expect(resolveAimarketsGatewayToken()).toBe("");
+  });
+
+  it("recognises AI Markets hosts", () => {
+    expect(isAimarketsHost(`${UID}.openclaw.aimarkets.vn`)).toBe(true);
+    expect(isAimarketsHost("OpenClaw.AIMarkets.vn:443")).toBe(true);
+    expect(isAimarketsHost("hotel1.phhotel.vn")).toBe(false);
+    expect(isAimarketsHost("evil-openclaw.aimarkets.vn")).toBe(false);
+    expect(isAimarketsHost(undefined)).toBe(false);
+    process.env.OPENCLAW_AIMARKETS_HOST_SUFFIX = "claw.example";
+    expect(isAimarketsHost("u.claw.example")).toBe(true);
   });
 });
