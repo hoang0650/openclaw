@@ -147,6 +147,9 @@ FEATHERLESS_API_KEY=...
 OPENROUTER_API_KEY=...
 AIMARKETS_API_URL=https://api.aimarkets.vn
 AIMARKETS_SERVICE_SECRET=<same as API>
+# Ponytail coding rules (shared service, see ponytail/deploy/DOKPLOY.md)
+PONYTAIL_URL=http://aimarketplace-ponytail:8787
+PONYTAIL_MODE=compact
 ```
 
 **Models:** PHHotel Nest stack (`phhotel-main` / DeepSeek Flash / Qwen / MiniMax) stays on `{hotelId}.phhotel.vn`. AI Markets Control UI only lists `aimarkets-*` OpenRouter/Featherless catalog; usage is billed to the buyer wallet at **provider COGS + 25%**.

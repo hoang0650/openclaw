@@ -21,6 +21,7 @@ import {
   peekUserKeys,
   registerCredentialResolver,
 } from "./byok.ts";
+import { createPonytailRules } from "./ponytail.ts";
 
 type PendingUsage = {
   input: number;
@@ -229,7 +230,7 @@ export default definePluginEntry({
   id: "aimarkets-usage",
   name: "AI Markets OpenClaw Usage",
   description:
-    "AI Markets policy: buyer-owned provider keys (BYOK), free OpenRouter trial, usage reporting.",
+    "AI Markets policy: buyer-owned provider keys (BYOK), free OpenRouter trial, usage reporting, Ponytail rules.",
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig || {}) as PluginConfig;
     const apiBaseUrl = resolveApiBase(cfg);
@@ -363,6 +364,18 @@ export default definePluginEntry({
         };
       }
       return { outcome: "pass" as const };
+    });
+
+    const ponytailRules = createPonytailRules({
+      url: readEnv("PONYTAIL_URL"),
+      mode: readEnv("PONYTAIL_MODE"),
+    });
+    api.on("before_prompt_build", async (_event: any, ctx: any) => {
+      const ctxObj = asRecord(ctx);
+      const sessionId = readString(ctxObj.sessionKey, ctxObj.sessionId);
+      if (!isAimarketsSession(sessionId, hostBits(ctx, sessionId))) return;
+      const rules = await ponytailRules();
+      return rules ? { prependSystemContext: rules } : undefined;
     });
 
     api.on("llm_output", async (event: any, ctx: any) => {
