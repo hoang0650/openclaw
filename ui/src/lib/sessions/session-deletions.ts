@@ -1,5 +1,5 @@
 import type { GatewaySessionRow, SessionsListResult } from "../../api/types.ts";
-import { hasOperatorAdminAccess } from "../../app/operator-access.ts";
+import { hasOperatorAdminAccess, hasOperatorWriteAccess } from "../../app/operator-access.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../format-error.ts";
 import { showToast } from "../toast.ts";
@@ -182,34 +182,39 @@ export function createSessionDeletions(host: DeletionHost) {
     }
     publish(deletion);
   };
-  // Fork: write-scoped Control UI devices can only delete via archive-then-delete.
-  const resolveDeleteArchivedOnly = (target: SessionDeleteTarget): boolean => {
-    if (target.archivedOnly === true || target.archivedOnly === false) {
-      return target.archivedOnly;
+  // Fork: write-scoped (non-admin) Control UI devices can only delete archived
+  // sessions, so they archive first. Explicit archivedOnly keeps upstream
+  // semantics (caller already archived); unknown auth keeps a plain delete.
+  const shouldArchiveBeforeDelete = (target: SessionDeleteTarget): boolean => {
+    if (target.archivedOnly !== undefined || target.alreadyArchived === true) {
+      return false;
     }
-    return host.readAuth ? !hasOperatorAdminAccess(host.readAuth()) : false;
+    const auth = host.readAuth?.();
+    return Boolean(auth && hasOperatorWriteAccess(auth) && !hasOperatorAdminAccess(auth));
   };
-  const prepareAndDeleteSession = async (
+  const prepareAndDeleteSession = (
     client: NonNullable<ReturnType<SessionConnectionOwner["capture"]>>["client"],
     target: SessionDeleteTarget,
   ) => {
-    const archivedOnly = resolveDeleteArchivedOnly(target);
-    if (archivedOnly && target.alreadyArchived !== true) {
-      await requestSessionPatch(
-        client,
-        target.key,
-        { archived: true },
-        {
-          agentId: target.agentId,
-          ...(target.expectedSessionId ? { expectedSessionId: target.expectedSessionId } : {}),
-        },
-      );
+    const { alreadyArchived, ...deleteOptions } = target;
+    if (alreadyArchived === true && target.archivedOnly === undefined) {
+      return requestSessionDelete(client, target.key, { ...deleteOptions, archivedOnly: true });
     }
-    const { alreadyArchived: _alreadyArchived, ...deleteOptions } = target;
-    return requestSessionDelete(client, target.key, {
-      ...deleteOptions,
-      archivedOnly: archivedOnly ? true : undefined,
-    });
+    if (!shouldArchiveBeforeDelete(target)) {
+      // Same request (and timing) as upstream.
+      return requestSessionDelete(client, target.key, deleteOptions);
+    }
+    return requestSessionPatch(
+      client,
+      target.key,
+      { archived: true },
+      {
+        agentId: target.agentId,
+        ...(target.expectedSessionId ? { expectedSessionId: target.expectedSessionId } : {}),
+      },
+    ).then(() =>
+      requestSessionDelete(client, target.key, { ...deleteOptions, archivedOnly: true }),
+    );
   };
   const perform = (
     deletion: Deletion,

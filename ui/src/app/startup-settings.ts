@@ -600,8 +600,10 @@ export function resolveApplicationStartupSettings(
   }
 
   if (gatewayUrlRaw != null) {
-    if (token || password || autoConnect) {
-      // Fork: prefer immediate apply for SSO/auto-login links from PHHotel.
+    if (token) {
+      // Fork: a launch link that carries its own token for this gateway applies
+      // immediately (PHHotel SSO). Without a URL token, a gateway change stays
+      // pending so stored credentials are re-scoped and never sent elsewhere.
       if (nextGatewayUrl) {
         updateSettings({ gatewayUrl: nextGatewayUrl });
       }
