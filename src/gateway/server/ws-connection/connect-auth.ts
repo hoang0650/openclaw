@@ -10,6 +10,11 @@ import {
 } from "../../../infra/device-bootstrap.js";
 import { verifyDeviceToken } from "../../../infra/device-pairing.js";
 import type { DeviceBootstrapProfile } from "../../../shared/device-bootstrap-profile.js";
+import {
+  isAimarketsHost,
+  isAimarketsTicketEnforced,
+  resolveAimarketsUserIdFromUpgrade,
+} from "../../aimarkets-ticket.js";
 import type { GatewayAuthResult } from "../../auth.js";
 import { formatForLog } from "../../ws-log.js";
 import { truncateCloseReason } from "../close-reason.js";
@@ -469,13 +474,27 @@ export async function authenticateGatewayConnect(
     });
     connectParams.scopes = scopes;
   }
-  const skipControlUiPairingForDevice = shouldSkipControlUiPairing(
-    controlUiAuthPolicy,
-    role,
-    trustedProxyAuthOk,
-    resolvedAuth.mode,
-    authMethod,
-  );
+  // AI Markets buyers launch the Control UI from aimarkets.vn with the derived
+  // shared token plus a signed per-buyer ticket (aimt cookie). That ticket is
+  // already the device/owner proof, so the browser should not wait on manual
+  // device pairing. Only when ticket enforcement is on, on aimarkets hosts,
+  // for operator Control UI connections that passed shared-token auth.
+  const aimarketsTicketPairingOk =
+    isControlUi &&
+    role === "operator" &&
+    authMethod === "token" &&
+    isAimarketsTicketEnforced() &&
+    isAimarketsHost(upgradeReq?.headers?.host) &&
+    Boolean(resolveAimarketsUserIdFromUpgrade(upgradeReq));
+  const skipControlUiPairingForDevice =
+    aimarketsTicketPairingOk ||
+    shouldSkipControlUiPairing(
+      controlUiAuthPolicy,
+      role,
+      trustedProxyAuthOk,
+      resolvedAuth.mode,
+      authMethod,
+    );
   const allowControlUiDeviceAuthMigration = shouldAllowControlUiDeviceAuthMigration({
     policy: controlUiAuthPolicy,
     role,
