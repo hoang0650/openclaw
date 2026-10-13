@@ -249,11 +249,11 @@ describe("AI Markets ticket pairing skip (fork)", () => {
     aimarketsTicketVerified: true,
   };
 
-  it("skips first-time pairing for a token-authed Control UI operator with a verified ticket", () => {
+  test("skips first-time pairing for a token-authed Control UI operator with a verified ticket", () => {
     expectSkipPairing(base, "aimarkets-ticket");
   });
 
-  it.each<[string, Partial<SkipPairingInput>]>([
+  test.each<[string, Partial<SkipPairingInput>]>([
     ["ticket not verified", { aimarketsTicketVerified: false }],
     ["ticket flag omitted", { aimarketsTicketVerified: undefined }],
     ["not Control UI", { isControlUi: false }],
