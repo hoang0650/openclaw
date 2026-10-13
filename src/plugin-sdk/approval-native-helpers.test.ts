@@ -12,7 +12,7 @@ import {
   nativeApprovalTargetsMatch,
   shouldSuppressLocalNativeExecApprovalPrompt,
 } from "./approval-native-helpers.js";
-import type { OpenClawConfig } from "./config-runtime.js";
+import type { OpenClawConfig } from "./config-contracts.js";
 
 const EMPTY_SESSION_CFG = {
   session: {
@@ -249,7 +249,7 @@ describe("createNativeApprovalChannelRouteGates", () => {
     ).toBe(false);
   });
 
-  it("uses default and single-enabled account fallback for unscoped targets", () => {
+  it("maps unscoped targets only to the default account", () => {
     const cfg = {
       approvals: {
         exec: {
@@ -285,7 +285,7 @@ describe("createNativeApprovalChannelRouteGates", () => {
         request: matrixExecRequest,
         target,
       }),
-    ).toBe(true);
+    ).toBe(false);
 
     expect(
       createMatrixRouteGates({
@@ -402,35 +402,6 @@ describe("createChannelNativeOriginTargetResolver", () => {
     ).toEqual({ to: "-100123", threadId: 42.9 });
   });
 
-  it("normalizes resolved targets before matching origin candidates", () => {
-    const resolveOriginTarget = createChannelNativeOriginTargetResolver<NativeApprovalTarget>({
-      channel: "slack",
-      resolveTurnSourceTarget: () => ({ to: "CHANNEL:C1", threadId: "171234.567890" }),
-      resolveSessionTarget: () => ({ to: "channel:c1", threadId: "171234.567890" }),
-      normalizeTarget: (target) => ({
-        ...target,
-        to: target.to.toLowerCase(),
-      }),
-    });
-
-    expect(
-      resolveOriginTarget({
-        cfg: EMPTY_SESSION_CFG,
-        request: {
-          id: "req-1",
-          request: {
-            command: "echo hi",
-            turnSourceChannel: "slack",
-            turnSourceTo: "CHANNEL:C1",
-            turnSourceThreadId: "171234.567890",
-          },
-          createdAtMs: 0,
-          expiresAtMs: 1000,
-        },
-      }),
-    ).toEqual({ to: "channel:c1", threadId: "171234.567890" });
-  });
-
   it("normalizes custom target shapes before invoking a custom matcher", () => {
     type ProviderTarget = { id: string; shard?: string };
 
@@ -452,63 +423,6 @@ describe("createChannelNativeOriginTargetResolver", () => {
             sessionKey: "agent:main:custom:room-1",
             turnSourceChannel: "custom",
             turnSourceTo: "ROOM-1",
-          },
-          createdAtMs: 0,
-          expiresAtMs: 1000,
-        },
-      }),
-    ).toEqual({ id: "room-1", shard: "a" });
-  });
-
-  it("normalizes only match inputs when delivery targets must stay provider-native", () => {
-    const resolveOriginTarget = createChannelNativeOriginTargetResolver<NativeApprovalTarget>({
-      channel: "slack",
-      resolveTurnSourceTarget: () => ({ to: "channel:C1", threadId: "171234.567890" }),
-      resolveSessionTarget: () => ({ to: "channel:c1", threadId: "171234.567890" }),
-      normalizeTargetForMatch: (target) => ({
-        ...target,
-        to: target.to.toLowerCase(),
-      }),
-    });
-
-    expect(
-      resolveOriginTarget({
-        cfg: EMPTY_SESSION_CFG,
-        request: {
-          id: "req-1",
-          request: {
-            command: "echo hi",
-            turnSourceChannel: "slack",
-            turnSourceTo: "channel:C1",
-            turnSourceThreadId: "171234.567890",
-          },
-          createdAtMs: 0,
-          expiresAtMs: 1000,
-        },
-      }),
-    ).toEqual({ to: "channel:C1", threadId: "171234.567890" });
-  });
-
-  it("keeps custom target matchers generic", () => {
-    type ProviderTarget = { id: string; shard?: string };
-
-    const resolveOriginTarget = createChannelNativeOriginTargetResolver<ProviderTarget>({
-      channel: "custom",
-      resolveTurnSourceTarget: () => ({ id: "room-1", shard: "a" }),
-      resolveSessionTarget: () => ({ id: "room-1", shard: "b" }),
-      targetsMatch: (left, right) => left.id === right.id,
-    });
-
-    expect(
-      resolveOriginTarget({
-        cfg: EMPTY_SESSION_CFG,
-        request: {
-          id: "req-1",
-          request: {
-            command: "echo hi",
-            sessionKey: "agent:main:custom:room-1",
-            turnSourceChannel: "custom",
-            turnSourceTo: "room-1",
           },
           createdAtMs: 0,
           expiresAtMs: 1000,

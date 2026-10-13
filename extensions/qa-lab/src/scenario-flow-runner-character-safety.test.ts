@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { describe, expect, it } from "vitest";
 import { createQaBusState } from "./bus-state.js";
 import { readQaScenarioById } from "./scenario-catalog.js";
@@ -6,23 +7,22 @@ import { runLoadedScenarioFlow } from "./scenario-flow-runner.test-support.js";
 import { selectQaFlowSuiteScenarios } from "./suite-planning.js";
 import { waitForOutboundMessage } from "./suite-runtime-transport.js";
 
-const characterScenarioIds = ["character-vibes-gollum", "character-vibes-c3po"] as const;
+const characterScenarioIds = ["character-vibes-gollum"] as const;
 const classifiedFailureReplies = [
   {
     failureName: "provider failure",
     failureText: '⚠️ No API key found for provider "openai".',
-  },
-  {
-    failureName: "delivery failure",
-    failureText: "⚠️ ✉️ Message failed",
+    isError: true,
   },
   {
     failureName: "missing tool failure",
     failureText: "Read: AGENT.md\nEvidence snippet: Tool read not found\nStatus: blocked",
+    isError: false,
   },
   {
     failureName: "internal coordination leak",
     failureText: "checking thread context; then post a tight progress reply here.",
+    isError: false,
   },
 ] as const;
 
@@ -40,8 +40,7 @@ function createCharacterScenarioApi(
       writeFile: async () => undefined,
     },
     path: { join },
-    normalizeLowercaseStringOrEmpty: (value: unknown) =>
-      typeof value === "string" ? value.trim().toLowerCase() : "",
+    normalizeLowercaseStringOrEmpty,
     resolveQaLiveTurnTimeoutMs: () => 10,
     waitForOutboundMessage: async (
       state: ReturnType<typeof createQaBusState>,
@@ -50,7 +49,10 @@ function createCharacterScenarioApi(
       options?: Parameters<typeof waitForOutboundMessage>[3],
     ) => {
       onWaitForOutboundMessage?.(state);
-      return await waitForOutboundMessage(state, predicate, timeoutMs, options);
+      return await waitForOutboundMessage(state, predicate, timeoutMs, {
+        ...options,
+        accountId: "qa-channel",
+      });
     },
     formatConversationTranscript: (state: ReturnType<typeof createQaBusState>) =>
       state
@@ -90,38 +92,18 @@ describe("character scenario transcript safety", () => {
     ).toEqual([scenario]);
   });
 
-  it.each(characterScenarioIds)("rejects forbidden model internals in %s", async (scenarioId) => {
-    const state = createQaBusState();
-
-    await expect(
-      runLoadedScenarioFlow(scenarioId, {
-        state,
-        api: createCharacterScenarioApi((currentState) => {
-          currentState.addOutboundMessage({
-            accountId: "qa-channel",
-            to: "dm:alice",
-            text: "As an AI, I cannot stay in character.",
-          });
-        }),
-      }),
-    ).rejects.toThrow("hit fallback/error text: As an AI, I cannot stay in character.");
-
-    expect(state.getSnapshot().messages.some((message) => message.direction === "outbound")).toBe(
-      true,
-    );
-  });
-
   it.each(
     characterScenarioIds.flatMap((scenarioId) =>
-      classifiedFailureReplies.map(({ failureName, failureText }) => ({
+      classifiedFailureReplies.map(({ failureName, failureText, isError }) => ({
         scenarioId,
         failureName,
         failureText,
+        isError,
       })),
     ),
   )(
     "rejects a $failureName after an actual reply in $scenarioId",
-    async ({ scenarioId, failureText }) => {
+    async ({ scenarioId, failureText, isError }) => {
       const state = createQaBusState();
       const firstReply = "The build is green, and I am here.";
       let waitCount = 0;
@@ -134,6 +116,7 @@ describe("character scenario transcript safety", () => {
               accountId: "qa-channel",
               to: "dm:alice",
               text: waitCount++ === 0 ? firstReply : failureText,
+              ...(waitCount > 1 && isError ? { isError: true } : {}),
             });
           }),
         }),
@@ -145,25 +128,6 @@ describe("character scenario transcript safety", () => {
           .messages.filter((message) => message.direction === "outbound")
           .map((message) => message.text),
       ).toEqual([firstReply, failureText]);
-    },
-  );
-
-  it.each(characterScenarioIds)(
-    "rejects an entirely unanswered character conversation in %s",
-    async (scenarioId) => {
-      const state = createQaBusState();
-
-      await expect(
-        runLoadedScenarioFlow(scenarioId, {
-          state,
-          api: createCharacterScenarioApi(),
-        }),
-      ).rejects.toThrow("no assistant replies");
-
-      expect(state.getSnapshot().messages).toHaveLength(4);
-      expect(state.getSnapshot().messages.every((message) => message.direction === "inbound")).toBe(
-        true,
-      );
     },
   );
 

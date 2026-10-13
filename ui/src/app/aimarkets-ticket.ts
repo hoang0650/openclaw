@@ -6,7 +6,7 @@
  * mirrors it into the `aimt` cookie so the gateway WebSocket upgrade can
  * verify it, and sends it as `X-Market-Ticket` to the marketplace key vault.
  */
-import { normalizeOptionalString } from "../lib/string-coerce.ts";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 
 const TICKET_STORAGE_KEY = "openclaw.aimarkets.ticket.v1";
 const TICKET_COOKIE = "aimt";

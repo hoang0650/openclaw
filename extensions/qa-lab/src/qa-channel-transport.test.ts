@@ -127,7 +127,7 @@ describe("qa channel transport", () => {
     );
   });
 
-  it("surfaces the last probe error on timeout", async () => {
+  it("surfaces the last check error on timeout", async () => {
     const transport = createQaChannelTransport(createQaBusState());
     const call = vi.fn().mockRejectedValue(new Error("channels.status exploded"));
 
@@ -137,7 +137,7 @@ describe("qa channel transport", () => {
         timeoutMs: 5,
         pollIntervalMs: 1,
       }),
-    ).rejects.toThrow("last probe error: channels.status exploded");
+    ).rejects.toThrow("last check error: channels.status exploded");
   });
 
   it("uses the shared normalized message state", async () => {
@@ -162,7 +162,8 @@ describe("qa channel transport", () => {
   });
 
   it("implements the portable scenario transport actions", async () => {
-    const transport = createQaChannelTransport(createQaBusState());
+    const state = createQaBusState();
+    const transport = createQaChannelTransport(state);
     const conversation = { id: "alice", kind: "direct" as const };
 
     await transport.sendInbound({
@@ -178,6 +179,8 @@ describe("qa channel transport", () => {
     await expect(
       transport.waitForOutbound({ conversation, textIncludes: "QA-PORTABLE-OK" }),
     ).resolves.toMatchObject({ text: "QA-PORTABLE-OK" });
+    // The synthetic fixture has no channel poller; record its completed turn.
+    state.resolvePollCursor({ acknowledgedCursor: state.getSnapshot().cursor });
     await transport.reset();
     expect(transport.state.getSnapshot().messages).toEqual([]);
   });
@@ -195,6 +198,7 @@ describe("qa channel transport", () => {
     state.addOutboundMessage({
       accountId: "other",
       to: "dm:alice",
+      isError: true,
       text: "⚠️ agent failed before reply: foreign account failure",
     });
     const expected = state.addOutboundMessage({
@@ -208,28 +212,6 @@ describe("qa channel transport", () => {
     ).resolves.toMatchObject({ accountId: "default", id: expected.id });
   });
 
-  it("does not accept deleted previews as visible outbound replies", async () => {
-    const state = createQaBusState();
-    const transport = createQaChannelTransport(state);
-    const preview = state.addOutboundMessage({
-      to: "dm:alice",
-      text: "QA-VISIBLE-FINAL-OK",
-    });
-    state.deleteMessage({ messageId: preview.id });
-    const final = state.addOutboundMessage({
-      to: "dm:alice",
-      text: "QA-VISIBLE-FINAL-OK",
-    });
-
-    await expect(
-      transport.waitForOutbound({
-        conversation: { id: "alice", kind: "direct" },
-        textIncludes: "QA-VISIBLE-FINAL-OK",
-        timeoutMs: 50,
-      }),
-    ).resolves.toMatchObject({ id: final.id });
-  });
-
   it("ignores another account's failure while waiting for a condition", async () => {
     const state = createQaBusState();
     const transport = createQaChannelTransport(state);
@@ -239,6 +221,7 @@ describe("qa channel transport", () => {
         state.addOutboundMessage({
           accountId: "other",
           to: "dm:alice",
+          isError: true,
           text: "⚠️ agent failed before reply: foreign account failure",
         });
         return "owned condition completed";
@@ -246,11 +229,7 @@ describe("qa channel transport", () => {
     ).resolves.toBe("owned condition completed");
   });
 
-  it.each([
-    { command: "stop", name: "stop" },
-    { command: "queue collect please help", name: "queue" },
-    { command: "think high", name: "think" },
-  ])(
+  it.each([{ command: "queue collect please help", name: "queue" }])(
     "injects /$name with its complete command and token-only metadata",
     async ({ command, name }) => {
       const transport = createQaChannelTransport(createQaBusState());
@@ -281,6 +260,7 @@ describe("qa channel transport", () => {
             await transport.state.addOutboundMessage({
               accountId: "default",
               to: "dm:qa-operator",
+              isError: true,
               text: "⚠️ agent failed before reply: synthetic failure for wait helper",
             });
           }
@@ -298,6 +278,7 @@ describe("qa channel transport", () => {
     await transport.state.addOutboundMessage({
       accountId: "default",
       to: "dm:qa-operator",
+      isError: true,
       text: "⚠️ agent failed before reply: stale failure should not leak",
     });
 

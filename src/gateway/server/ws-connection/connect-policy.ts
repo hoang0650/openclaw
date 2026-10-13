@@ -1,68 +1,53 @@
-// WebSocket connect policy resolves Control UI pairing bypasses and missing-device identity decisions.
 import type { ConnectParams } from "../../../../packages/gateway-protocol/src/index.js";
-import type { GatewayRole } from "../../role-policy.js";
 import { roleCanSkipDeviceIdentity } from "../../role-policy.js";
+import type { GatewayRole } from "../../role-policy.types.js";
 
-type ControlUiAuthPolicy = {
+export type ControlUiPairingKind = "tailscale-device" | "aimarkets-ticket" | "auth-none" | null;
+
+export function shouldSkipControlUiPairing(params: {
   isControlUi: boolean;
   device: ConnectParams["device"] | null | undefined;
-  deviceAuthMigrationPending: boolean;
-};
-
-export function resolveControlUiAuthPolicy(params: {
-  isControlUi: boolean;
-  controlUiConfig: unknown;
-  deviceRaw: ConnectParams["device"] | null | undefined;
-  deviceAuthMigrationPending?: boolean;
-}): ControlUiAuthPolicy {
-  void params.controlUiConfig;
-  return {
-    isControlUi: params.isControlUi,
-    device: params.deviceRaw,
-    deviceAuthMigrationPending: params.deviceAuthMigrationPending === true,
-  };
-}
-
-export function shouldAllowControlUiDeviceAuthMigration(params: {
-  policy: ControlUiAuthPolicy;
   role: GatewayRole;
-  sharedAuthOk: boolean;
-  trustedProxyAuthOk?: boolean;
+  authMode?: string;
   authMethod?: string;
-}): boolean {
-  const sharedAuthOk =
-    params.sharedAuthOk && (params.authMethod === "token" || params.authMethod === "password");
-  const trustedProxyAuthOk =
-    params.trustedProxyAuthOk === true && params.authMethod === "trusted-proxy";
-  return (
-    params.policy.deviceAuthMigrationPending &&
-    params.policy.isControlUi &&
+  /**
+   * Fork (AI Markets): caller verified ticket enforcement is on, the host is an
+   * aimarkets host and the upgrade carries a valid signed aimt ticket.
+   */
+  aimarketsTicketVerified?: boolean;
+}): ControlUiPairingKind {
+  if (
+    params.isControlUi &&
     params.role === "operator" &&
-    (sharedAuthOk || trustedProxyAuthOk)
-  );
-}
-
-export function shouldSkipControlUiPairing(
-  policy: ControlUiAuthPolicy,
-  role: GatewayRole,
-  _trustedProxyAuthOk = false,
-  authMode?: string,
-  authMethod?: string,
-): boolean {
-  if (policy.isControlUi && role === "operator" && authMethod === "tailscale" && policy.device) {
-    return true;
+    params.authMethod === "tailscale" &&
+    params.device
+  ) {
+    return "tailscale-device";
+  }
+  // AI Markets buyers launch the Control UI with the derived shared token plus a
+  // signed per-buyer ticket; that ticket is the device/owner proof. Like the
+  // tailscale case this only waives first-time pairing for a presented device;
+  // known devices still go through the normal paired-device checks.
+  if (
+    params.isControlUi &&
+    params.role === "operator" &&
+    params.authMethod === "token" &&
+    params.aimarketsTicketVerified === true &&
+    params.device
+  ) {
+    return "aimarkets-ticket";
   }
   // When auth is completely disabled (mode=none), there is no shared secret
   // or token to gate pairing. Requiring pairing in this configuration adds
   // friction without security value since any client can already connect
-  // without credentials. Guard with policy.isControlUi because this function
-  // is called for ALL clients (not just Control UI) at the call site.
+  // without credentials. Guard with isControlUi because this function is
+  // called for ALL clients (not just Control UI) at the call site.
   // Scope to operator role so node-role sessions still need device identity
   // (#43478 was reverted for skipping ALL clients).
-  if (policy.isControlUi && role === "operator" && authMode === "none") {
-    return true;
+  if (params.isControlUi && params.role === "operator" && params.authMode === "none") {
+    return "auth-none";
   }
-  return false;
+  return null;
 }
 
 export function isTrustedProxyControlUiOperatorAuth(params: {
@@ -89,17 +74,13 @@ type MissingDeviceIdentityDecision =
 
 export function shouldClearUnboundScopesForMissingDeviceIdentity(params: {
   decision: MissingDeviceIdentityDecision;
-  controlUiAuthPolicy: ControlUiAuthPolicy;
-  preserveInsecureLocalControlUiScopes: boolean;
   authMethod: string | undefined;
-  trustedProxyAuthOk?: boolean;
 }): boolean {
   return (
     params.decision.kind !== "allow" ||
-    (!params.preserveInsecureLocalControlUiScopes &&
-      (params.authMethod === "token" ||
-        params.authMethod === "password" ||
-        params.authMethod === "trusted-proxy"))
+    params.authMethod === "token" ||
+    params.authMethod === "password" ||
+    params.authMethod === "trusted-proxy"
   );
 }
 
@@ -107,13 +88,11 @@ export function evaluateMissingDeviceIdentity(params: {
   hasDeviceIdentity: boolean;
   role: GatewayRole;
   isControlUi: boolean;
-  controlUiAuthPolicy: ControlUiAuthPolicy;
   trustedProxyAuthOk?: boolean;
   localBackendSelfPairingOk?: boolean;
   sharedAuthOk: boolean;
   authOk: boolean;
   hasSharedAuth: boolean;
-  isLocalClient: boolean;
 }): MissingDeviceIdentityDecision {
   if (params.hasDeviceIdentity) {
     return { kind: "allow" };

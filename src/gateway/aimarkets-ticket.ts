@@ -165,7 +165,9 @@ export function collectMarketSessionUserIds(params: unknown): Set<string> {
         return;
       }
       for (const match of value.matchAll(MARKET_SESSION_RE)) {
-        found.add(match[1].toLowerCase());
+        if (match[1]) {
+          found.add(match[1].toLowerCase());
+        }
       }
       return;
     }

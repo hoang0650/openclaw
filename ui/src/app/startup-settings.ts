@@ -1,36 +1,78 @@
-// Control UI startup settings resolve native auth handoff and URL parameters.
-import { normalizeOptionalString } from "../lib/string-coerce.ts";
+import {
+  normalizeGatewayClientId,
+  normalizeGatewayClientMode,
+} from "@openclaw/gateway-protocol/client-info";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeUniqueTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
+import { buildControlUiFocusPath } from "@openclaw/session-url-contract";
+import type { RouteLocation } from "@openclaw/uirouter";
+import {
+  CONTROL_UI_BOOTSTRAP_PROFILE_FRAGMENT_PARAM,
+  CONTROL_UI_OWNER_BOOTSTRAP_PROFILE_HINT,
+  type ControlUiBootstrapProfileHint,
+} from "../../../src/gateway/control-ui-bootstrap-contract.js";
+import type { GatewayBrowserClientOptions } from "../api/gateway.ts";
+import { inferBasePathFromPathname, sessionRouteNamespaceFromPath } from "../app-route-paths.ts";
 import { storeAimarketsTicket, syncAimarketsTicketCookie } from "./aimarkets-ticket.ts";
-import type { UiSettings } from "./settings.ts";
-
-type ApplicationStartupLocation = {
-  pathname: string;
-  search: string;
-  hash: string;
-};
+import { createNativeGatewayConnectAuth } from "./native-gateway-auth.ts";
+import { isRemoteControlUiIngress } from "./remote-ingress.ts";
+import {
+  resolveGatewayCredentialsForUrlEdit,
+  resolvePageGatewaySettings,
+  type UiSettings,
+} from "./settings.ts";
 
 type NativeControlAuth = {
   gatewayUrl?: string | null;
+  nativeConnectAuth?: boolean;
   token?: string | null;
   password?: string | null;
+  client?: {
+    id?: string | null;
+    mode?: string | null;
+    platform?: string | null;
+    deviceFamily?: string | null;
+    instanceId?: string | null;
+    scopes?: unknown;
+  } | null;
 };
 
-type ApplicationStartupSettings = {
-  settings: UiSettings;
-  password: string | null;
-  pendingGatewayUrl: string | null;
-  pendingGatewayToken: string | null;
-  pendingBootstrapToken: string | null;
-  queryTokenUsed: boolean;
-  autoConnect: boolean;
-  location: ApplicationStartupLocation;
-  changed: boolean;
-};
+type NativeGatewayClientOptions = Pick<
+  GatewayBrowserClientOptions,
+  | "clientName"
+  | "mode"
+  | "platform"
+  | "deviceFamily"
+  | "instanceId"
+  | "scopes"
+  | "nativeConnectAuth"
+>;
 
 declare global {
   interface Window {
     __OPENCLAW_NATIVE_CONTROL_AUTH__?: NativeControlAuth;
   }
+}
+
+export function normalizeLegacyTerminalViewLocation(
+  location: RouteLocation,
+  basePath: string,
+): RouteLocation {
+  const applicationRoot = basePath ? `${basePath}/` : "/";
+  if (location.pathname !== applicationRoot) {
+    return location;
+  }
+  const searchParams = new URLSearchParams(location.search);
+  if (searchParams.get("view") !== "terminal") {
+    return location;
+  }
+  searchParams.delete("view");
+  const search = searchParams.toString();
+  return {
+    pathname: buildControlUiFocusPath({ kind: "terminal" }, basePath),
+    search: search ? `?${search}` : "",
+    hash: location.hash,
+  };
 }
 
 function decodeConfigPayload(raw: string | null): Record<string, unknown> | null {
@@ -66,7 +108,7 @@ export function parsePhhotelTenantHotelId(
         ? new URL(raw).hostname
         : raw.split("/")[0]?.split(":")[0] || "";
       const fromSubdomain = /^([a-f0-9]{24})\.phhotel\.vn$/i.exec(host);
-      if (fromSubdomain) {
+      if (fromSubdomain?.[1]) {
         return fromSubdomain[1].toLowerCase();
       }
     } catch {
@@ -124,7 +166,7 @@ export function parseAimarketsUserId(
         ? new URL(raw).hostname
         : raw.split("/")[0]?.split(":")[0] || "";
       const fromSubdomain = /^([a-f0-9]{24})\.openclaw\.aimarkets\.vn$/i.exec(host);
-      if (fromSubdomain) {
+      if (fromSubdomain?.[1]) {
         return fromSubdomain[1].toLowerCase();
       }
     } catch {
@@ -172,15 +214,20 @@ function readParam(
 
 export function resolveApplicationStartupSettings(
   initialSettings: UiSettings,
-  location: ApplicationStartupLocation,
-): ApplicationStartupSettings {
-  let settings = initialSettings;
-  let changed = false;
+  location: RouteLocation,
+) {
+  const remoteIngress = isRemoteControlUiIngress();
+  let settings = remoteIngress
+    ? { ...resolvePageGatewaySettings(initialSettings), token: "" }
+    : initialSettings;
+  let changed = remoteIngress;
   let password: string | null = null;
   let pendingGatewayUrl: string | null = null;
   let pendingGatewayToken: string | null = null;
   let pendingBootstrapToken: string | null = null;
-  let queryTokenUsed = false;
+  let pendingBootstrapProfile: ControlUiBootstrapProfileHint | null = null;
+  let nativeClient: NativeGatewayClientOptions | null = null;
+  // Fork (PHHotel / AI Markets): connect immediately after credential handoff.
   let autoConnect = false;
 
   const updateSettings = (patch: Partial<UiSettings>) => {
@@ -194,8 +241,18 @@ export function resolveApplicationStartupSettings(
     changed = true;
   };
 
+  const injectedNativeAuth =
+    remoteIngress || typeof window === "undefined"
+      ? undefined
+      : window["__OPENCLAW_NATIVE_CONTROL_AUTH__"];
+  // Older Android WebViews cannot inject at document start. This public marker
+  // selects native-only auth immediately; authority arrives over a main-frame port.
+  // Keep the marker in the URL so a reload cannot start a browser pairing flow.
+  const nativePortGateway =
+    !remoteIngress && new URLSearchParams(location.hash.replace(/^#/, "")).get("nativeControlAuth");
   const nativeAuth =
-    typeof window === "undefined" ? undefined : window["__OPENCLAW_NATIVE_CONTROL_AUTH__"];
+    injectedNativeAuth ??
+    (nativePortGateway ? { gatewayUrl: nativePortGateway, nativeConnectAuth: true } : undefined);
   if (nativeAuth) {
     try {
       delete window["__OPENCLAW_NATIVE_CONTROL_AUTH__"];
@@ -206,14 +263,52 @@ export function resolveApplicationStartupSettings(
     const gatewayUrl = normalizeOptionalString(nativeAuth.gatewayUrl);
     const token = normalizeOptionalString(nativeAuth.token);
     const nativePassword = normalizeOptionalString(nativeAuth.password);
+    const credentials = gatewayUrl
+      ? resolveGatewayCredentialsForUrlEdit(settings.gatewayUrl, gatewayUrl, {
+          token: settings.token,
+          password: "",
+        })
+      : null;
+    const client = nativeAuth.client;
+    const clientName = normalizeGatewayClientId(client?.id);
+    const mode = normalizeGatewayClientMode(client?.mode);
+    const platform = normalizeOptionalString(client?.platform);
+    const deviceFamily = normalizeOptionalString(client?.deviceFamily);
+    const instanceId = normalizeOptionalString(client?.instanceId);
+    const scopes = normalizeUniqueTrimmedStringList(client?.scopes);
+    if (clientName && mode && platform && deviceFamily && scopes.length > 0) {
+      nativeClient = {
+        clientName,
+        mode,
+        platform,
+        deviceFamily,
+        ...(instanceId ? { instanceId } : {}),
+        scopes,
+      };
+    }
+    if (nativeAuth.nativeConnectAuth === true && gatewayUrl) {
+      nativeClient = {
+        nativeConnectAuth: createNativeGatewayConnectAuth(gatewayUrl, {
+          messagePort: !injectedNativeAuth && Boolean(nativePortGateway),
+        }),
+      };
+    }
     updateSettings({
       ...(gatewayUrl ? { gatewayUrl } : {}),
-      ...(token ? { token } : {}),
+      // An explicit null retires shared-owner auth for the native browser sign-in
+      // route; an omitted token still preserves the selected Gateway's credentials.
+      ...(nativeAuth.nativeConnectAuth === true
+        ? { token: "" }
+        : nativeAuth.token === null || token
+          ? { token: token ?? "" }
+          : credentials
+            ? { token: credentials.token }
+            : {}),
     });
-    if (nativePassword) {
+    if (nativePassword && nativeAuth.nativeConnectAuth !== true) {
       password = nativePassword;
     }
-    if (token || nativePassword) {
+    if ((token || nativePassword) && nativeAuth.nativeConnectAuth !== true) {
       autoConnect = true;
     }
   }
@@ -226,7 +321,8 @@ export function resolveApplicationStartupSettings(
       pendingGatewayUrl,
       pendingGatewayToken,
       pendingBootstrapToken,
-      queryTokenUsed,
+      pendingBootstrapProfile,
+      nativeClient,
       autoConnect,
       location,
       changed,
@@ -240,7 +336,11 @@ export function resolveApplicationStartupSettings(
   const params = new URLSearchParams(url.search);
   const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
 
-  const configPayload = decodeConfigPayload(readParam(params, hashParams, "config"));
+  // Fork (PHHotel): `config` is a base64url JSON launch payload carrying
+  // gatewayUrl/url, token/gatewayToken, password and autoConnect.
+  const configPayload = remoteIngress
+    ? null
+    : decodeConfigPayload(readParam(params, hashParams, "config"));
   if (configPayload) {
     if (
       !params.get("gatewayUrl") &&
@@ -277,37 +377,36 @@ export function resolveApplicationStartupSettings(
     if (configPayload.autoConnect === true || configPayload.autoConnect === "true") {
       autoConnect = true;
     }
-    params.delete("config");
-    hashParams.delete("config");
   }
 
-  const gatewayUrlRaw = readParam(params, hashParams, "gatewayUrl", "url");
+  const gatewayUrlRaw = remoteIngress ? null : readParam(params, hashParams, "gatewayUrl", "url");
   const nextGatewayUrl = normalizeOptionalString(gatewayUrlRaw) ?? "";
   const gatewayUrlChanged = Boolean(nextGatewayUrl && nextGatewayUrl !== settings.gatewayUrl);
   const queryToken = params.get("token") ?? params.get("gatewayToken");
   const hashToken = hashParams.get("token") ?? hashParams.get("gatewayToken");
   const hasTokenParam = hashToken != null || queryToken != null;
-  const token = normalizeOptionalString(hashToken ?? queryToken);
-  const hasBootstrapTokenParam = hashParams.has("bootstrapToken");
+  const token = remoteIngress ? undefined : normalizeOptionalString(hashToken ?? queryToken);
+  const hasBootstrapTokenParam = !remoteIngress && hashParams.has("bootstrapToken");
   const bootstrapToken = normalizeOptionalString(hashParams.get("bootstrapToken"));
-  const session = normalizeOptionalString(params.get("session") ?? hashParams.get("session"));
-  const hotelIdParam = normalizeOptionalString(
-    params.get("hotelId") ??
-      hashParams.get("hotelId") ??
-      params.get("hotel_id") ??
-      hashParams.get("hotel_id") ??
-      params.get("tenant_id") ??
-      hashParams.get("tenant_id") ??
-      params.get("tenantId") ??
-      hashParams.get("tenantId"),
+  const bootstrapProfile = normalizeOptionalString(
+    hashParams.get(CONTROL_UI_BOOTSTRAP_PROFILE_FRAGMENT_PARAM),
   );
-  const userIdParam = normalizeOptionalString(
-    params.get("userId") ??
-      hashParams.get("userId") ??
-      params.get("user_id") ??
-      hashParams.get("user_id"),
+  const sessionPath = sessionRouteNamespaceFromPath(
+    location.pathname,
+    inferBasePathFromPathname(location.pathname),
   );
-  // hotelId = tenantId trên subdomain gateway, vd https://69d73f54e5302e4f720b66af.phhotel.vn/
+  const session = remoteIngress
+    ? undefined
+    : normalizeOptionalString(params.get("session") ?? hashParams.get("session"));
+  const hotelIdParam = remoteIngress
+    ? undefined
+    : normalizeOptionalString(
+        readParam(params, hashParams, "hotelId", "hotel_id", "tenant_id", "tenantId"),
+      );
+  const userIdParam = remoteIngress
+    ? undefined
+    : normalizeOptionalString(readParam(params, hashParams, "userId", "user_id"));
+  // hotelId = tenantId on the gateway subdomain, e.g. https://<24hex>.phhotel.vn/
   const hotelIdFromDomain = parsePhhotelTenantHotelId(
     globalThis.location?.hostname,
     nextGatewayUrl,
@@ -315,30 +414,23 @@ export function resolveApplicationStartupSettings(
     settings.gatewayUrl,
   );
   const hotelIdHint = hotelIdParam || hotelIdFromDomain;
-  const autoConnectParam = readParam(params, hashParams, "autoConnect", "autoApprove");
+  const autoConnectParam = remoteIngress
+    ? null
+    : readParam(params, hashParams, "autoConnect", "autoApprove");
   if (autoConnectParam && ["1", "true", "yes"].includes(autoConnectParam.trim().toLowerCase())) {
     autoConnect = true;
   }
   const shouldResetSessionForToken = Boolean(
-    token && !session && !hotelIdHint && !gatewayUrlChanged,
+    token && !sessionPath && !session && !hotelIdHint && !gatewayUrlChanged,
   );
-  let shouldCleanUrl = false;
-
-  if (params.has("token") || params.has("gatewayToken")) {
-    params.delete("token");
-    params.delete("gatewayToken");
-    shouldCleanUrl = true;
-  }
-
   if (hasTokenParam) {
     if (queryToken != null) {
-      queryTokenUsed = true;
       console.warn(
         "[openclaw] Auth token passed as query parameter (?token=). Use URL fragment instead: #token=<token>. Query parameters may appear in server logs.",
       );
     }
-    // Auto-login handoff: apply gateway URL + token immediately so Control UI connects
-    // without waiting for a manual confirm dialog.
+    // Fork (PHHotel auto-login handoff): apply gateway URL + token immediately so
+    // Control UI connects without the manual gateway-change confirm dialog.
     if (token && nextGatewayUrl) {
       updateSettings({ gatewayUrl: nextGatewayUrl, token });
       pendingGatewayUrl = null;
@@ -351,15 +443,14 @@ export function resolveApplicationStartupSettings(
       updateSettings({ token });
       autoConnect = true;
     }
-    hashParams.delete("token");
-    hashParams.delete("gatewayToken");
-    shouldCleanUrl = true;
   }
 
   if (hasBootstrapTokenParam) {
     pendingBootstrapToken = bootstrapToken ?? null;
-    hashParams.delete("bootstrapToken");
-    shouldCleanUrl = true;
+    pendingBootstrapProfile =
+      bootstrapToken && bootstrapProfile === CONTROL_UI_OWNER_BOOTSTRAP_PROFILE_HINT
+        ? CONTROL_UI_OWNER_BOOTSTRAP_PROFILE_HINT
+        : null;
   }
 
   if (shouldResetSessionForToken) {
@@ -369,7 +460,8 @@ export function resolveApplicationStartupSettings(
     });
   }
 
-  const passwordRaw = readParam(params, hashParams, "password");
+  let shouldCleanUrl = false;
+  const passwordRaw = remoteIngress ? null : readParam(params, hashParams, "password");
   if (passwordRaw != null) {
     const passwordFromUrl = normalizeOptionalString(passwordRaw);
     if (passwordFromUrl) {
@@ -380,9 +472,6 @@ export function resolveApplicationStartupSettings(
         updateSettings({ token: passwordFromUrl });
       }
     }
-    params.delete("password");
-    hashParams.delete("password");
-    shouldCleanUrl = true;
   }
 
   // PHHotel: session must be hotel-<tenantId> so phhotel-usage can check quota + record tokens.
@@ -512,7 +601,7 @@ export function resolveApplicationStartupSettings(
 
   if (gatewayUrlRaw != null) {
     if (token || password || autoConnect) {
-      // Prefer immediate apply for SSO/auto-login links from PHHotel.
+      // Fork: prefer immediate apply for SSO/auto-login links from PHHotel.
       if (nextGatewayUrl) {
         updateSettings({ gatewayUrl: nextGatewayUrl });
       }
@@ -522,21 +611,32 @@ export function resolveApplicationStartupSettings(
       }
     } else {
       pendingGatewayUrl = gatewayUrlChanged ? nextGatewayUrl : null;
-      if (!gatewayUrlChanged) {
-        pendingGatewayToken = null;
-      } else if (pendingBootstrapToken) {
+      if (!gatewayUrlChanged || pendingBootstrapToken) {
         pendingGatewayToken = null;
       }
     }
-    params.delete("gatewayUrl");
-    params.delete("url");
-    hashParams.delete("gatewayUrl");
-    hashParams.delete("url");
-    params.delete("autoConnect");
-    params.delete("autoApprove");
-    hashParams.delete("autoConnect");
-    hashParams.delete("autoApprove");
-    shouldCleanUrl = true;
+  }
+
+  for (const source of [params, hashParams]) {
+    const keys = [
+      "token",
+      "gatewayToken",
+      "password",
+      "gatewayUrl",
+      "url",
+      "config",
+      "autoConnect",
+      "autoApprove",
+    ];
+    if (source === hashParams) {
+      keys.push("bootstrapToken", CONTROL_UI_BOOTSTRAP_PROFILE_FRAGMENT_PARAM);
+    }
+    for (const key of keys) {
+      if (source.has(key)) {
+        source.delete(key);
+        shouldCleanUrl = true;
+      }
+    }
   }
 
   if (shouldCleanUrl) {
@@ -551,7 +651,8 @@ export function resolveApplicationStartupSettings(
     pendingGatewayUrl,
     pendingGatewayToken,
     pendingBootstrapToken,
-    queryTokenUsed,
+    pendingBootstrapProfile,
+    nativeClient,
     autoConnect,
     location: shouldCleanUrl
       ? {

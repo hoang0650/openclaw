@@ -4,15 +4,11 @@ import { titleForRoute } from "../../app-navigation.ts";
 import { readAimarketsTicket } from "../../app/aimarkets-ticket.ts";
 import { resolveOpenClawAudience } from "../../app/audience-models.ts";
 import {
-  renderDocsLink,
   renderSettingsEmpty,
   renderSettingsPage,
   renderSettingsRow,
-  renderSettingsSecretInput,
   renderSettingsSection,
-  renderSettingsStatus,
 } from "../../components/settings-ui.ts";
-import { renderSettingsWorkspace } from "../../components/settings-workspace.ts";
 import { t } from "../../i18n/index.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import {
@@ -30,6 +26,54 @@ import {
 type Draft = { apiKey: string; baseUrl: string; model: string; visible: boolean };
 type BusyAction = "save" | "test" | "remove";
 type Notice = { kind: "ok" | "danger"; text: string };
+
+// Upstream retired these settings-ui helpers; the BYOK page keeps small local
+// equivalents so it does not depend on removed shared components.
+function renderDocsLink(href: string, label: string) {
+  return html`<a href=${href} target="_blank" rel="noopener noreferrer">${label}</a>`;
+}
+
+function renderSettingsStatus(props: { kind: "ok" | "danger" | "muted"; label: string }) {
+  return html`<span class="settings-status settings-status--${props.kind}">${props.label}</span>`;
+}
+
+function renderSettingsSecretInput(props: {
+  ariaLabel: string;
+  value: string;
+  placeholder: string;
+  visible: boolean;
+  showLabel: string;
+  hideLabel: string;
+  toggleLabel: string;
+  onInput: (next: string) => void;
+  onToggle: () => void;
+}) {
+  return html`<div style="display:flex;gap:8px;align-items:center">
+    <input
+      class="settings-input"
+      style="flex:1"
+      type=${props.visible ? "text" : "password"}
+      autocomplete="off"
+      spellcheck="false"
+      aria-label=${props.ariaLabel}
+      placeholder=${props.placeholder}
+      .value=${props.value}
+      @input=${(event: Event) => props.onInput((event.currentTarget as HTMLInputElement).value)}
+    />
+    <button
+      type="button"
+      class="btn btn--sm"
+      aria-label=${props.toggleLabel}
+      @click=${() => props.onToggle()}
+    >
+      ${props.visible ? props.hideLabel : props.showLabel}
+    </button>
+  </div>`;
+}
+
+function renderIntro(text: string) {
+  return html`<p class="settings-section__desc">${text}</p>`;
+}
 
 function errorText(err: unknown): string {
   if (err instanceof ByokApiError || err instanceof Error) {
@@ -156,7 +200,7 @@ class MyApiKeysPage extends OpenClawLightDomElement {
     });
   }
 
-  private remove(provider: ByokProvider) {
+  private removeKey(provider: ByokProvider) {
     if (!globalThis.confirm(t("myApiKeysPage.removeConfirm", { provider: provider.label }))) {
       return;
     }
@@ -299,7 +343,7 @@ class MyApiKeysPage extends OpenClawLightDomElement {
                       type="button"
                       class="btn btn--sm danger"
                       ?disabled=${Boolean(busy)}
-                      @click=${() => this.remove(provider)}
+                      @click=${() => this.removeKey(provider)}
                     >
                       ${busy === "remove" ? t("myApiKeysPage.removing") : t("myApiKeysPage.remove")}
                     </button>
@@ -328,26 +372,26 @@ class MyApiKeysPage extends OpenClawLightDomElement {
       `);
     }
     if (this.ticketMissing) {
-      return renderSettingsPage(
-        renderSettingsSection(
+      return renderSettingsPage(html`
+        ${renderIntro(t("myApiKeysPage.intro"))}
+        ${renderSettingsSection(
           { title: t("myApiKeysPage.noTicketTitle") },
           renderSettingsEmpty(html`${t("myApiKeysPage.noTicketBody")}
           ${renderDocsLink("https://aimarkets.vn", "aimarkets.vn")}`),
-        ),
-        { intro: t("myApiKeysPage.intro") },
-      );
+        )}
+      `);
     }
-    return renderSettingsPage(
-      renderSettingsSection(
+    return renderSettingsPage(html`
+      ${renderIntro(t("myApiKeysPage.intro"))}
+      ${renderSettingsSection(
         {
           title: t("myApiKeysPage.providersTitle"),
           description: t("myApiKeysPage.providersDescription"),
           count: Object.keys(this.keys).length,
         },
         this.providers.map((provider) => this.renderProvider(provider)),
-      ),
-      { intro: t("myApiKeysPage.intro") },
-    );
+      )}
+    `);
   }
 
   override render() {
@@ -357,7 +401,7 @@ class MyApiKeysPage extends OpenClawLightDomElement {
           <div class="page-title">${titleForRoute("my-api-keys")}</div>
         </div>
       </section>
-      ${renderSettingsWorkspace(this.renderBody())}
+      ${this.renderBody()}
     `;
   }
 }
