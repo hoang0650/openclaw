@@ -240,6 +240,23 @@ openclaw-session-owner-chip {
   line-height: 1.55;
 }
 
+.login-gate__failure-steps,
+.login-gate__failure-summary,
+.login-gate__request-id code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.login-gate__request-id {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.login-gate__request-id code {
+  overflow-wrap: anywhere;
+}
+
 .login-gate__failure-steps li + li {
   margin-top: 4px;
 }

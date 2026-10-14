@@ -35,6 +35,8 @@ type LoginFailureFeedback = {
   docsHref: string;
   docsLabel: string;
   rawError: string;
+  /** Pending pairing request id, rendered as a copyable value (text inside alerts is hard to select). */
+  requestId?: string;
 };
 
 type LoginGateProps = {
@@ -98,6 +100,7 @@ function buildFeedback(params: {
   stepKeys: string[];
   stepParams?: Record<string, string>;
   refreshAction?: { label: string };
+  requestId?: string;
 }): LoginFailureFeedback {
   const docsHref = params.docsHref ?? "https://docs.openclaw.ai/web/dashboard";
   return {
@@ -109,6 +112,7 @@ function buildFeedback(params: {
     docsHref,
     docsLabel: resolveDocsLabel(docsHref),
     rawError: redactLoginFailureError(params.rawError),
+    ...(params.requestId ? { requestId: params.requestId } : {}),
   };
 }
 
@@ -150,6 +154,7 @@ function resolveLoginFailureFeedback(
         "login.failure.pairing.stepReconnect",
       ],
       stepParams: { requestId: pairing.requestId ?? "" },
+      requestId: pairing.requestId ?? undefined,
     });
   }
 
@@ -298,6 +303,14 @@ function renderLoginFailure(feedback: LoginFailureFeedback) {
       <ol class="login-gate__failure-steps">
         ${feedback.steps.map((step) => html`<li>${step}</li>`)}
       </ol>
+      ${feedback.requestId
+        ? html`
+            <div class="login-gate__request-id" data-request-id=${feedback.requestId}>
+              ${renderConnectCommand(feedback.requestId)}
+              ${renderConnectCommand(`openclaw devices approve ${feedback.requestId}`)}
+            </div>
+          `
+        : nothing}
       <details class="login-gate__failure-detail">
         <summary>${t("login.failure.rawError")}</summary>
         <div class="login-gate__failure-raw mono">${feedback.rawError}</div>
