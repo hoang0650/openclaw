@@ -1,5 +1,6 @@
 // Control UI startup settings resolve native auth handoff and URL parameters.
 import { normalizeOptionalString } from "../lib/string-coerce.ts";
+import { isForeignMarketSession } from "./aimarkets-session-guard.ts";
 import { storeAimarketsTicket, syncAimarketsTicketCookie } from "./aimarkets-ticket.ts";
 import type { UiSettings } from "./settings.ts";
 
@@ -150,7 +151,10 @@ export function resolveAimarketsScopedSessionKey(
   if (!current || isPhhotelUnscopedMainSession(current)) {
     return `market-${userId}`;
   }
-  if (!/(?:^|[:/_-])market[:_-]/i.test(current)) {
+  if (
+    !/(?:^|[:/_-])market[:_-]/i.test(current) ||
+    isForeignMarketSession(current, userId.toLowerCase())
+  ) {
     return `market-${userId}`;
   }
   return undefined;
@@ -492,7 +496,8 @@ export function resolveApplicationStartupSettings(
       if (
         !effectiveSession ||
         isPhhotelUnscopedMainSession(effectiveSession) ||
-        !/(?:^|[:/_-])market[:_-]/i.test(effectiveSession)
+        !/(?:^|[:/_-])market[:_-]/i.test(effectiveSession) ||
+        isForeignMarketSession(effectiveSession, resolvedMarketUserId.toLowerCase())
       ) {
         effectiveSession = `market-${resolvedMarketUserId}`;
       }

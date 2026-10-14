@@ -32,6 +32,10 @@ import {
 } from "@openclaw/gateway-client/browser";
 // Control UI module implements gateway behavior.
 import { formatErrorMessage } from "@openclaw/normalization-core";
+import {
+  isForeignAimarketsSessionError,
+  recoverFromForeignAimarketsSession,
+} from "../app/aimarkets-session-guard.ts";
 import { redactToolDetail } from "../lib/browser-redact.ts";
 import {
   clearDeviceAuthToken,
@@ -314,14 +318,20 @@ export class GatewayBrowserClient {
     this.client = new GatewayProtocolClient<ConnectPlan>({
       createSocket: (handlers) => createBrowserGatewaySocket(this.opts.url, handlers),
       createRequestId: generateUUID,
-      createRequestError: (error) =>
-        new GatewayRequestError({
+      createRequestError: (error) => {
+        // AI Markets: a stale session selection pointing at another buyer is
+        // dropped and the UI reloads on the buyer's own session.
+        if (isForeignAimarketsSessionError(error.message)) {
+          recoverFromForeignAimarketsSession();
+        }
+        return new GatewayRequestError({
           code: error.code ?? "UNAVAILABLE",
           message: error.message ?? "request failed",
           details: error.details,
           retryable: error.retryable,
           retryAfterMs: error.retryAfterMs,
-        }),
+        });
+      },
       buildConnectPlan: ({ nonce, challengeTs, generation }) =>
         this.buildConnectPlan(nonce, challengeTs, generation),
       buildConnectParams: (plan) => plan.params,
