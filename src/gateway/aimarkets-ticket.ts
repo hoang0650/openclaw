@@ -152,6 +152,33 @@ export function resolveAimarketsUserIdFromUpgrade(
   );
 }
 
+/**
+ * AI Markets buyers launch the Control UI with the derived shared token plus a
+ * signed per-buyer ticket (`aimt` cookie). That ticket is the device/owner
+ * proof, so the browser should not wait on manual device pairing. Only when
+ * ticket enforcement is on, on aimarkets hosts, for operator Control UI
+ * connections that passed shared-token auth and carry a valid ticket.
+ */
+export function shouldSkipAimarketsControlUiPairing(params: {
+  isControlUi: boolean;
+  role: string;
+  authMethod: string | undefined;
+  upgradeReq: Pick<IncomingMessage, "headers"> | undefined;
+}): boolean {
+  return (
+    params.isControlUi &&
+    params.role === "operator" &&
+    params.authMethod === "token" &&
+    isAimarketsTicketEnforced() &&
+    isAimarketsHost(headerString(params.upgradeReq?.headers?.host)) &&
+    Boolean(resolveAimarketsUserIdFromUpgrade(params.upgradeReq))
+  );
+}
+
+function headerString(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 /** Collects every `market-<uid>` buyer id referenced anywhere in request params. */
 export function collectMarketSessionUserIds(params: unknown): Set<string> {
   const found = new Set<string>();
@@ -165,7 +192,9 @@ export function collectMarketSessionUserIds(params: unknown): Set<string> {
         return;
       }
       for (const match of value.matchAll(MARKET_SESSION_RE)) {
-        found.add(match[1].toLowerCase());
+        if (match[1]) {
+          found.add(match[1].toLowerCase());
+        }
       }
       return;
     }
