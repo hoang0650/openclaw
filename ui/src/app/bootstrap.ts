@@ -24,6 +24,7 @@ import {
   startModelSetupFirstRunRedirectAfterLocation,
 } from "../pages/model-setup/first-run.ts";
 import { createAgentSelectionCapability } from "./agent-selection.ts";
+import { guardAimarketsSessionOnStartup } from "./aimarkets-session-guard.ts";
 import { resolveApprovalDocumentMode, type ApprovalDocumentMode } from "./approval-deep-link.ts";
 import { createBrowserHistory, resolveControlUiBasePath } from "./browser.ts";
 import { createApplicationConfigCapability } from "./config.ts";
@@ -260,7 +261,13 @@ export function bootstrapApplication(
   dependencies: BootstrapApplicationDependencies = {},
 ): ApplicationRuntime {
   const history = createBrowserHistory();
-  const startupLocation = history.location();
+  const rawStartupLocation = history.location();
+  // AI Markets: a route/param/persisted selection naming another buyer's
+  // market session is replaced by the current buyer's own session.
+  const startupLocation = guardAimarketsSessionOnStartup(rawStartupLocation) ?? rawStartupLocation;
+  if (startupLocation !== rawStartupLocation) {
+    history.replace(startupLocation);
+  }
   const initialBasePath = resolveControlUiBasePath(
     startupLocation.pathname || globalThis.location?.pathname || "/",
   );
