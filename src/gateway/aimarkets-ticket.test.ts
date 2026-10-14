@@ -7,6 +7,7 @@ import {
   isAimarketsTicketEnforced,
   resolveAimarketsGatewayToken,
   resolveAimarketsUserIdFromUpgrade,
+  shouldSkipAimarketsControlUiPairing,
   verifyAimarketsTicket,
 } from "./aimarkets-ticket.js";
 
@@ -119,5 +120,42 @@ describe("aimarkets ticket", () => {
     expect(isAimarketsHost(undefined)).toBe(false);
     process.env.OPENCLAW_AIMARKETS_HOST_SUFFIX = "claw.example";
     expect(isAimarketsHost("u.claw.example")).toBe(true);
+  });
+
+  it("skips Control UI pairing only for valid AI Markets ticket connections", () => {
+    const ticket = issue(UID, Date.now() + 60_000);
+    const req = (host: string, cookie?: string) => ({
+      headers: { host, ...(cookie ? { cookie: `aimt=${cookie}` } : {}) },
+    });
+    const base = {
+      isControlUi: true,
+      role: "operator",
+      authMethod: "token",
+      upgradeReq: req(`${UID}.openclaw.aimarkets.vn`, ticket),
+    };
+    expect(shouldSkipAimarketsControlUiPairing(base)).toBe(true);
+    expect(shouldSkipAimarketsControlUiPairing({ ...base, isControlUi: false })).toBe(false);
+    expect(shouldSkipAimarketsControlUiPairing({ ...base, role: "node" })).toBe(false);
+    expect(shouldSkipAimarketsControlUiPairing({ ...base, authMethod: "none" })).toBe(false);
+    expect(
+      shouldSkipAimarketsControlUiPairing({ ...base, upgradeReq: req("evil.example.com", ticket) }),
+    ).toBe(false);
+    expect(
+      shouldSkipAimarketsControlUiPairing({
+        ...base,
+        upgradeReq: req(`${UID}.openclaw.aimarkets.vn`),
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipAimarketsControlUiPairing({
+        ...base,
+        upgradeReq: req(
+          `${UID}.openclaw.aimarkets.vn`,
+          issue(UID, Date.now() + 60_000, "other-secret"),
+        ),
+      }),
+    ).toBe(false);
+    process.env.OPENCLAW_AIMARKETS_TICKET_ENFORCE = "0";
+    expect(shouldSkipAimarketsControlUiPairing(base)).toBe(false);
   });
 });

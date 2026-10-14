@@ -36,6 +36,7 @@ import type {
   ApplicationThemeServerSelection,
 } from "./context.ts";
 import { syncCustomThemeStyleTag } from "./custom-theme.ts";
+import { resetGatewayStateOnAimarketsIdentitySwitch } from "./gateway-logout.ts";
 import { createApplicationGateway } from "./gateway-store.ts";
 import { createInitialUserMessageHandoff } from "./initial-user-message-handoff.ts";
 import { createNativeChatDrafts } from "./native-bridge.ts";
@@ -264,6 +265,9 @@ export function bootstrapApplication(
     startupLocation.pathname || globalThis.location?.pathname || "/",
   );
   const documentMode = resolveApprovalDocumentMode(startupLocation.pathname, initialBasePath);
+  // AI Markets: a launch link for another buyer must not reuse the previous
+  // buyer's stored token/device/session (runs before settings are loaded).
+  resetGatewayStateOnAimarketsIdentitySwitch(startupLocation);
   const persistedSettings = loadSettings();
   const initialSettings = documentMode
     ? resolvePageGatewaySettings(persistedSettings)

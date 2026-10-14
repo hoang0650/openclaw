@@ -6,6 +6,7 @@ import type { AgentIdentityResult } from "../api/types.ts";
 import { titleForRoute, type NavigationRouteId } from "../app-navigation.ts";
 import { pathForAgentPanel } from "../app-route-paths.ts";
 import type { ApplicationNavigationOptions } from "../app/context.ts";
+import { logoutControlUi } from "../app/gateway-logout.ts";
 import type { ThemeMode } from "../app/theme.ts";
 import { t } from "../i18n/index.ts";
 import { normalizeAgentLabel } from "../lib/agents/display.ts";
@@ -421,6 +422,9 @@ export function renderSidebarIdentityMenu(params: SidebarIdentityMenuParams) {
             case `${COMMAND_VALUE_PREFIX}retry-connect`:
               params.onRetryConnect?.();
               break;
+            case `${COMMAND_VALUE_PREFIX}logout`:
+              logoutControlUi(params.basePath);
+              break;
           }
         }}
         @keydown=${(event: KeyboardEvent) =>
@@ -484,6 +488,13 @@ export function renderSidebarIdentityMenu(params: SidebarIdentityMenuParams) {
                 <span class="sidebar-customize-menu__text">${t("connection.retryNow")}</span>
               </wa-dropdown-item>`
           : nothing}
+        <div class="sidebar-customize-menu__separator" role="separator"></div>
+        <wa-dropdown-item
+          class="sidebar-customize-menu__item sidebar-identity-menu__logout"
+          value="command:logout"
+        >
+          <span class="sidebar-customize-menu__text">${t("common.logout")}</span>
+        </wa-dropdown-item>
         <div class="sidebar-customize-menu__separator" role="separator"></div>
         <div class="sidebar-identity-menu__footer">
           <openclaw-sidebar-build-chip

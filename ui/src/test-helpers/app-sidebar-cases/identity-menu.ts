@@ -50,6 +50,7 @@ describe("AppSidebar footer identity menu", () => {
       "command:pair-mobile",
       "command:apps",
       "command:help",
+      "command:logout",
     ]);
     expect(menu?.querySelector(".sidebar-identity-menu__header")?.textContent?.trim()).toBe(
       "ada@example.test",
