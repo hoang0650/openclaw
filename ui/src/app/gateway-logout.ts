@@ -14,6 +14,9 @@ import {
 } from "./aimarkets-ticket.ts";
 import { isAimarketsHostname } from "./audience-models.ts";
 
+/** Same name as ui/src/lib/chat/control-ui-database.runtime.ts (kept local to avoid loading it at boot). */
+const CONTROL_UI_DATABASE_NAME = "openclaw-control-ui";
+
 const CLEARED_KEY_PREFIXES = [
   "openclaw.control.settings.v1",
   "openclaw.control.token.v1",
@@ -55,6 +58,13 @@ export function clearGatewayBrowserState(): void {
     // storage unavailable
   }
   clearAimarketsTicket();
+  // Upstream caches chat snapshots, drafts and the outbox per origin in IndexedDB;
+  // a different buyer on this browser must not see the previous buyer's cache.
+  try {
+    globalThis.indexedDB?.deleteDatabase(CONTROL_UI_DATABASE_NAME);
+  } catch {
+    // IndexedDB unavailable
+  }
 }
 
 /** Logs out of this gateway origin and returns to the connect screen. */

@@ -41,7 +41,7 @@ export function normalizeModelId(model: string): string {
 
 export function resolveProviderRate(model: string): { input: number; output: number } {
   const bare = normalizeModelId(model);
-  return AIMARKETS_PROVIDER_RATES[bare] || AIMARKETS_PROVIDER_RATES.default;
+  return AIMARKETS_PROVIDER_RATES[bare] ?? AIMARKETS_PROVIDER_RATES.default ?? { input: 0, output: 0 };
 }
 
 /** Sell cost in USD for token usage (provider COGS + markup%). Free models stay 0. */

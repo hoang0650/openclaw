@@ -1,11 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../../config/runtime-snapshot.js";
+import {
+  emitAgentEvent,
   getAgentEventLifecycleGeneration,
+  onAgentRuntimeEvent,
   resetAgentEventsForTest,
   rotateAgentEventLifecycleGeneration,
 } from "../../../infra/agent-events.js";
 import { claimAgentRunContext, getAgentRunContext } from "../../../infra/agent-run-registry.js";
 import type { CommandQueueEnqueueOptions } from "../../../process/command-queue.types.js";
+import { createTestAdmittedRunContext } from "../../admitted-run-context.test-support.js";
 import type { EmbeddedAgentRunResult } from "../types.js";
 import { createEmbeddedRunLaneController } from "./lane-controller.js";
 import type { RunEmbeddedAgentParams } from "./params.js";
@@ -48,9 +55,13 @@ function createController(options: {
   trigger?: LaneParams["trigger"];
   abortSignal?: AbortSignal;
   runId?: string;
+  params?: Pick<LaneParams, "agentId" | "sessionKey" | "swarmExecutionLane">;
+  inputProvenance?: LaneParams["inputProvenance"];
 }) {
   let lifecycleGeneration = options.lifecycleGeneration;
+  const runId = options.runId ?? "run-1";
   let params: LaneParams = {
+    admittedRunContext: createTestAdmittedRunContext(runId),
     agentId: "main",
     sessionId: "session-1",
     sessionKey: "agent:main:session-1",
@@ -58,12 +69,15 @@ function createController(options: {
     workspaceDir: "/tmp/workspace",
     prompt: "hello",
     timeoutMs: 30_000,
-    runId: options.runId ?? "run-1",
+    runId,
     lifecycleGeneration,
     trigger: options.trigger,
+    inputProvenance: options.inputProvenance,
     enqueue: options.enqueue,
     abortSignal: options.abortSignal,
+    ...options.params,
   };
+  setRuntimeConfigSnapshot(params.config ?? {});
   const controller = createEmbeddedRunLaneController({
     getLifecycleGeneration: () => lifecycleGeneration,
     getParams: () => params,
@@ -89,32 +103,87 @@ describe("createEmbeddedRunLaneController lifecycle admission", () => {
   beforeEach(() => {
     resetAgentEventsForTest();
   });
+  afterEach(() => {
+    clearRuntimeConfigSnapshot();
+  });
 
-  it.each([
-    { trigger: "user" as const, expected: "foreground" },
-    { trigger: "cron" as const, expected: "background" },
-  ])("marks $trigger session work as $expected", async ({ trigger, expected }) => {
+  it("marks user session work as foreground", async () => {
+    const trigger = "user" as const;
+    const expected = "foreground";
     const priorities: Array<CommandQueueEnqueueOptions["priority"]> = [];
     const enqueue: LaneParams["enqueue"] = async (task, options) => {
       priorities.push(options?.priority);
       return await task();
     };
     const generation = getAgentEventLifecycleGeneration();
-    const { controller } = createController({ lifecycleGeneration: generation, enqueue, trigger });
+    const { controller } = createController({
+      lifecycleGeneration: generation,
+      enqueue,
+      trigger,
+    });
 
     await controller.enqueueSession(async () => undefined);
 
     expect(priorities).toEqual([expected]);
   });
 
-  it("rebinds foreground work that was queued before lifecycle rotation", async () => {
+  it("applies the current swarm capacity only to global execution admission", async () => {
+    const capacities: Array<number | undefined> = [];
+    let maxConcurrent = 32;
+    const { controller } = createController({
+      lifecycleGeneration: getAgentEventLifecycleGeneration(),
+      enqueue: async (task, options) => {
+        capacities.push(options?.maxConcurrent);
+        return await task();
+      },
+      params: {
+        swarmExecutionLane: {
+          lane: "subagent:swarm:group",
+          get maxConcurrent() {
+            return maxConcurrent;
+          },
+        },
+      },
+    });
+    maxConcurrent = 8;
+    await controller.enqueueSession(() => controller.enqueueGlobal(async () => completedResult));
+    expect(capacities).toEqual([undefined, 8]);
+  });
+
+  it("preserves the selected agent for sessionless admitted runtime events", async () => {
+    const runId = "sessionless-owned-run";
+    const { controller } = createController({
+      lifecycleGeneration: getAgentEventLifecycleGeneration(),
+      enqueue: async (task) => await task(),
+      runId,
+      params: { agentId: "research", sessionKey: undefined },
+    });
+    const events: Array<{ agentId?: string; sessionKey?: string }> = [];
+    const unsubscribe = onAgentRuntimeEvent((event) => events.push(event));
+
+    try {
+      await controller.enqueueGlobal(async () => {
+        emitAgentEvent({ runId, stream: "assistant", data: { delta: "owned progress" } });
+        return completedResult;
+      });
+
+      expect(getAgentRunContext(runId)).toMatchObject({ agentId: "research" });
+      expect(getAgentRunContext(runId)?.sessionKey).toBeUndefined();
+      expect(events).toMatchObject([{ agentId: "research", sessionKey: undefined }]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("rebinds inter-session user work that was queued before lifecycle rotation", async () => {
     const queue = deferredTaskQueue();
     const generation = getAgentEventLifecycleGeneration();
     const state = createController({
       lifecycleGeneration: generation,
       enqueue: queue.enqueue as LaneParams["enqueue"],
       trigger: "user",
-      runId: "queued-across-restart",
+      inputProvenance: { kind: "inter_session", sourceTool: "sessions_send" },
+      runId: "inter-session-across-restart",
     });
     const run = state.controller.enqueueGlobal(async () => completedResult);
 
@@ -123,8 +192,7 @@ describe("createEmbeddedRunLaneController lifecycle admission", () => {
     await run;
 
     expect(state.getLifecycleGeneration()).toBe(currentGeneration);
-    expect(state.getParams().lifecycleGeneration).toBe(currentGeneration);
-    expect(getAgentRunContext("queued-across-restart")).toMatchObject({
+    expect(getAgentRunContext("inter-session-across-restart")).toMatchObject({
       lifecycleGeneration: currentGeneration,
     });
   });

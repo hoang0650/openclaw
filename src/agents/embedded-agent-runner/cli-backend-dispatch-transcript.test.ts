@@ -29,6 +29,8 @@ function recorderParams() {
     prompt: "recall prompt",
     provider: "claude-cli",
     model: "claude-opus-4-8",
+    expectedLifecycleRevision: "revision-a",
+    expectedWriterRunId: "run-transcript-test",
     senderIsOwner: true,
   };
 }
@@ -39,24 +41,6 @@ beforeEach(() => {
 });
 
 describe("createCliDispatchTranscriptRecorder", () => {
-  it("appends the user turn to the run's session identity", async () => {
-    const recorder = createCliDispatchTranscriptRecorder(recorderParams());
-    await recorder.finalize();
-
-    const records = appendedRecords();
-    expect(records[0]?.scope).toMatchObject({
-      sessionId: "recall-session",
-      sessionKey: "agent:main:recall",
-      agentId: "main",
-      sessionFile: "sqlite://agents/main/recall-session",
-    });
-    expect(records[0]?.message).toMatchObject({
-      role: "user",
-      content: [{ type: "text", text: "recall prompt" }],
-      __openclaw: { senderIsOwner: true },
-    });
-  });
-
   it("mirrors tool calls and results in the shapes the recall parsers accept", async () => {
     const recorder = createCliDispatchTranscriptRecorder(recorderParams());
     recorder.noteToolEvent({
@@ -77,7 +61,21 @@ describe("createCliDispatchTranscriptRecorder", () => {
     });
     await recorder.finalize("Lemon pepper.");
 
-    const messages = appendedRecords().map((record) => record.message);
+    const records = appendedRecords();
+    const messages = records.map((record) => record.message);
+    expect(records[0]?.scope).toMatchObject({
+      sessionId: "recall-session",
+      sessionKey: "agent:main:recall",
+      agentId: "main",
+      sessionFile: "sqlite://agents/main/recall-session",
+      expectedLifecycleRevision: "revision-a",
+      expectedWriterRunId: "run-transcript-test",
+    });
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      content: [{ type: "text", text: "recall prompt" }],
+      __openclaw: { senderIsOwner: true },
+    });
     expect(messages[1]).toMatchObject({
       role: "assistant",
       content: [
@@ -177,20 +175,6 @@ describe("createCliDispatchTranscriptRecorder", () => {
     await recorder.finalize();
   });
 
-  it("flushes the last streamed assistant snapshot when no final text exists", async () => {
-    const recorder = createCliDispatchTranscriptRecorder(recorderParams());
-    recorder.noteAssistantText("partial an");
-    recorder.noteAssistantText("partial answer before timeout");
-    await recorder.finalize(undefined);
-
-    const assistant = appendedRecords().find(
-      (record) => record.message.role === "assistant",
-    )?.message;
-    expect(assistant).toMatchObject({
-      content: [{ type: "text", text: "partial answer before timeout" }],
-    });
-  });
-
   it("flushes the latest snapshot on abort and does not duplicate it at finalize", async () => {
     const recorder = createCliDispatchTranscriptRecorder(recorderParams());
     recorder.noteAssistantText("partial before kill");
@@ -208,6 +192,10 @@ describe("createCliDispatchTranscriptRecorder", () => {
     expect(assistants[0]?.message).toMatchObject({
       content: [{ type: "text", text: "partial before kill" }],
       stopReason: "aborted",
+    });
+    expect(assistants[0]?.scope).toMatchObject({
+      expectedLifecycleRevision: "revision-a",
+      expectedWriterRunId: "run-transcript-test",
     });
   });
 

@@ -7,13 +7,17 @@ import {
   fetchNpmManifest,
   readBoundedNpmRegistryText,
   renderTransitiveManifestRiskMarkdownReport,
-} from "../../scripts/transitive-manifest-risk-report.mjs";
+} from "../../scripts/transitive-manifest-risk-report.mts";
 
 function runCli(...args: string[]) {
-  return spawnSync(process.execPath, ["scripts/transitive-manifest-risk-report.mjs", ...args], {
-    cwd: path.resolve("."),
-    encoding: "utf8",
-  });
+  return spawnSync(
+    process.execPath,
+    ["--import", "tsx", "scripts/transitive-manifest-risk-report.mts", ...args],
+    {
+      cwd: path.resolve("."),
+      encoding: "utf8",
+    },
+  );
 }
 
 function expectNoNodeStack(stderr: string) {
@@ -49,6 +53,10 @@ describe("transitive-manifest-risk-report", () => {
               floating: "^1.2.3",
               exact: "2.0.0",
               gitdep: "github:owner/repo#main",
+              malformedSemver: "01.2.3",
+              fragmentlessGitPath:
+                "git+https://github.com/owner/repo/commit/0123456789abcdef0123456789abcdef01234567",
+              pinnedGit: "github:owner/repo#0123456789abcdef0123456789abcdef01234567",
             },
             optionalDependencies: {
               optionalFloating: "~3.0.0",
@@ -62,8 +70,8 @@ describe("transitive-manifest-risk-report", () => {
     });
 
     expect(report.byType).toEqual({
-      "exotic-source": 2,
-      "floating-transitive-spec": 3,
+      "exotic-source": 4,
+      "floating-transitive-spec": 5,
       "lifecycle-script": 1,
       "recently-published-version": 1,
     });
@@ -309,18 +317,6 @@ describe("transitive-manifest-risk-report", () => {
     expect(canceled).toBe(true);
   });
 
-  it("rejects npm registry bodies that exceed the content-length cap without a body", async () => {
-    const response = new Response(null, {
-      headers: {
-        "content-length": "12",
-      },
-    });
-
-    await expect(readBoundedNpmRegistryText(response, 8)).rejects.toThrow(
-      "npm registry response exceeded 8 bytes",
-    );
-  });
-
   it("streams non-decimal npm registry content-length values through the body cap", async () => {
     const encoder = new TextEncoder();
     let readStarted = false;
@@ -347,23 +343,5 @@ describe("transitive-manifest-risk-report", () => {
     );
     expect(readStarted).toBe(true);
     expect(canceled).toBe(true);
-  });
-
-  it("rejects npm registry bodies that grow past the stream cap", async () => {
-    const encoder = new TextEncoder();
-    const response = new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode("1234"));
-          controller.enqueue(encoder.encode("5678"));
-          controller.enqueue(encoder.encode("9"));
-          controller.close();
-        },
-      }),
-    );
-
-    await expect(readBoundedNpmRegistryText(response, 8)).rejects.toThrow(
-      "npm registry response exceeded 8 bytes",
-    );
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantMessage } from "../types.js";
-import { isConfiguredContextSizeOverflowError, isContextOverflow } from "./overflow.js";
+import { createZeroUsage } from "../usage.test-support.js";
+import { isContextOverflow, matchesContextOverflowMessage } from "./overflow.js";
 
 function errorMessage(message: string): AssistantMessage {
   return {
@@ -9,14 +10,7 @@ function errorMessage(message: string): AssistantMessage {
     api: "test-api",
     provider: "test-provider",
     model: "test-model",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
+    usage: createZeroUsage(),
     stopReason: "error",
     errorMessage: message,
     timestamp: 1,
@@ -42,25 +36,32 @@ function successfulMessage(
   };
 }
 
-describe("configured context size overflow", () => {
+describe("provider overflow messages", () => {
   it.each([
-    "400 Prompt has 256468 tokens, but the configured context size is 256000 tokens",
-    "Prompt has 5,958,968 tokens, but the configured context size is 256,000 tokens",
+    { type: "provider_refusal", overflow: false },
+    { type: "provider_fallback", overflow: true },
+  ])("preserves $type when the error text mentions overflow", ({ type, overflow }) => {
+    const message = errorMessage("prompt is too long: 1200 tokens > 1000 maximum");
+    message.diagnostics = [{ type, timestamp: 1 }];
+    expect(isContextOverflow(message, 1000)).toBe(overflow);
+  });
+
+  it.each([
+    "Context window exceeded: estimated input 35137 leaves only 0 output tokens within the 32768-token context.",
+    "Trying to keep the first 15857 tokens when context the overflows. However, the model is loaded with context length of only 4096 tokens, which is not enough. Try to load the model with a larger context length, or provide a shorter input.",
   ])("detects %s", (text) => {
-    expect(isConfiguredContextSizeOverflowError(text)).toBe(true);
-    expect(isContextOverflow(errorMessage(text), 256_000)).toBe(true);
+    expect(isContextOverflow(errorMessage(text), 262_144)).toBe(true);
   });
 });
 
-describe("provider overflow messages", () => {
-  it.each([
-    "Error: 400 Input length (265330) exceeds model's maximum context length (262144).",
-    "Provider returned error: Input length 131393 exceeds the maximum allowed input length of 131,040 tokens.",
-    "Input length 131393 exceeds maximum allowed input length of 131040 token",
-    "code 1210: tokens in request more than max tokens allowed",
-    "code 1261: Prompt exceeds max length",
-  ])("detects %s", (text) => {
-    expect(isContextOverflow(errorMessage(text), 262_144)).toBe(true);
+describe("scoped overflow messages", () => {
+  it("recognizes the provider input-length wording in the strict failover scope", () => {
+    expect(
+      matchesContextOverflowMessage(
+        "input length 14295 tokens exceeds the model limit",
+        "failover-explicit",
+      ),
+    ).toBe(true);
   });
 });
 

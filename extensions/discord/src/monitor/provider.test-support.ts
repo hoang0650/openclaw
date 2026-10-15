@@ -26,9 +26,6 @@ export const discordProviderTestSupport = {
   setCreateClient(mock: typeof discordProviderRuntime.createClient) {
     discordProviderRuntime.createClient = mock;
   },
-  setGetPluginCommandSpecs(mock: typeof discordProviderRuntime.getPluginCommandSpecs) {
-    discordProviderRuntime.getPluginCommandSpecs = mock;
-  },
   setResolveDiscordAccount(mock: typeof discordProviderRuntime.resolveDiscordAccount) {
     discordProviderRuntime.resolveDiscordAccount = mock;
   },
@@ -45,8 +42,10 @@ export const discordProviderTestSupport = {
   ) {
     discordProviderRuntime.listNativeCommandSpecsForConfig = mock;
   },
-  setListSkillCommandsForAgents(mock: typeof discordProviderRuntime.listSkillCommandsForAgents) {
-    discordProviderRuntime.listSkillCommandsForAgents = mock;
+  setPrepareSkillCommandsForAgents(
+    mock: typeof discordProviderRuntime.prepareSkillCommandsForAgents,
+  ) {
+    discordProviderRuntime.prepareSkillCommandsForAgents = mock;
   },
   setIsVerbose(mock: typeof discordProviderRuntime.isVerbose) {
     discordProviderRuntime.isVerbose = mock;
