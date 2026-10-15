@@ -429,6 +429,26 @@ describe("login gate failure recovery", () => {
     ]);
   });
 
+  it("renders the pairing request id as its own copyable value", async () => {
+    const rid = "72515e44-4900-45d3-a2a4-e6ea72f43e5e";
+    const element = await mountFailure(
+      `pairing required (requestId: ${rid})`,
+      ConnectErrorDetailCodes.PAIRING_REQUIRED,
+    );
+    const box = element.querySelector<HTMLElement>(".login-gate__request-id");
+    expect(box?.dataset.requestId).toBe(rid);
+    expect(box?.querySelector("code")?.textContent?.trim()).toBe(rid);
+    expect(box?.querySelector(".chat-copy-btn")).not.toBeNull();
+    expect(element.querySelector(".login-gate__command--hero code")?.textContent?.trim()).toBe(
+      `openclaw devices approve ${rid}`,
+    );
+  });
+
+  it("omits the request id box when the gateway sent no id", async () => {
+    const element = await mountFailure("pairing required", ConnectErrorDetailCodes.PAIRING_REQUIRED);
+    expect(element.querySelector(".login-gate__request-id")).toBeNull();
+  });
+
   it.each([" "])(
     "surfaces denied gateway-command copying from the %s interaction",
     async (interaction) => {

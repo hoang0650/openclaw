@@ -172,6 +172,7 @@ describe("AppSidebar footer identity menu", () => {
       "command:apps",
       "command:debug-overlay",
       "command:help",
+      "command:logout",
     ]);
     const footerName = identity?.querySelector(".sidebar-identity-card__name");
     const menuName = menu?.querySelector(".sidebar-identity-menu__name");

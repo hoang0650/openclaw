@@ -15,11 +15,7 @@ import {
 import { intersectOperatorScopes } from "../../../shared/operator-scope-compat.js";
 import { captureGatewayAuthPolicy } from "../../auth-policy.js";
 import { AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET } from "../../auth-rate-limit.js";
-import {
-  isAimarketsHost,
-  isAimarketsTicketEnforced,
-  resolveAimarketsUserIdFromUpgrade,
-} from "../../aimarkets-ticket.js";
+import { shouldSkipAimarketsControlUiPairing } from "../../aimarkets-ticket.js";
 import type { GatewayAuthResult } from "../../auth.js";
 import { getRemoteControlUiIngressContext } from "../../ingress-attribution.js";
 import { withSerializedCredentialFallbackAttempt } from "../../rate-limit-attempt-serialization.js";
@@ -484,13 +480,14 @@ async function authenticateGatewayConnectCore(
     role,
     authMode: resolvedAuth.mode,
     authMethod,
-    aimarketsTicketVerified:
-      isControlUi &&
-      role === "operator" &&
-      authMethod === "token" &&
-      isAimarketsTicketEnforced() &&
-      isAimarketsHost(upgradeReq?.headers?.host) &&
-      Boolean(resolveAimarketsUserIdFromUpgrade(upgradeReq)),
+    // AI Markets: a verified per-buyer ticket is the device/owner proof (see
+    // shouldSkipAimarketsControlUiPairing); no manual pairing wait.
+    aimarketsTicketVerified: shouldSkipAimarketsControlUiPairing({
+      isControlUi,
+      role,
+      authMethod,
+      upgradeReq,
+    }),
   });
 
   return {

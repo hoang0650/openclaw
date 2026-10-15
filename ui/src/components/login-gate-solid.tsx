@@ -297,6 +297,13 @@ function StatusBody(
           </div>
         )}
       </Show>
+      <Show when={props.feedback.requestId}>
+        {(requestId) => (
+          <div class="login-gate__request-id" data-request-id={requestId()}>
+            <ConnectCommand command={requestId()} />
+          </div>
+        )}
+      </Show>
       <Steps feedback={props.feedback} />
       {props.feedback.kind === "busy" && (
         <p class="login-gate__retry" aria-live="off">

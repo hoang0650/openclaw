@@ -47,6 +47,12 @@ function writeCookie(ticket: string | null, expiresAt?: number) {
   document.cookie = `${TICKET_COOKIE}=${encodeURIComponent(ticket)}; Path=/; Max-Age=${maxAge}; SameSite=Strict${secure}`;
 }
 
+/** Buyer id encoded in a raw (unverified) ticket, for client-side routing only. */
+export function peekAimarketsTicketUserId(rawTicket: string | null | undefined): string | null {
+  const ticket = normalizeOptionalString(rawTicket);
+  return ticket ? (decodeTicket(ticket)?.userId ?? null) : null;
+}
+
 /** Stores a freshly issued ticket. Returns false for malformed or expired tickets. */
 export function storeAimarketsTicket(rawTicket: string | null | undefined): boolean {
   const ticket = normalizeOptionalString(rawTicket);
@@ -94,10 +100,33 @@ export function readAimarketsTicket(userId?: string | null): AimarketsTicket | n
   }
 }
 
-/** Re-mirrors a stored ticket into the cookie (e.g. after the cookie jar was cleared). */
+/** Removes the stored ticket and the `aimt` cookie. */
+export function clearAimarketsTicket() {
+  try {
+    globalThis.localStorage?.removeItem(TICKET_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+  writeCookie(null);
+}
+
+/** Buyer id of the stored ticket, even if it does not match the current link. */
+export function readStoredAimarketsTicketUserId(): string | null {
+  return readAimarketsTicket()?.userId ?? null;
+}
+
+/**
+ * Re-mirrors a stored ticket into the cookie (e.g. after the cookie jar was
+ * cleared). A stored ticket that belongs to another buyer is dropped so the
+ * WebSocket upgrade never carries a stale `aimt` cookie for the wrong account.
+ */
 export function syncAimarketsTicketCookie(userId?: string | null) {
   const stored = readAimarketsTicket(userId);
   if (stored) {
     writeCookie(stored.ticket, stored.expiresAt);
+    return;
+  }
+  if (normalizeOptionalString(userId) && readAimarketsTicket()) {
+    clearAimarketsTicket();
   }
 }

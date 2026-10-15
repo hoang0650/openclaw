@@ -2,6 +2,7 @@ import { html, nothing } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { titleForRoute, type NavigationRouteId } from "../app-navigation.ts";
 import type { ApplicationNavigationOptions } from "../app/context.ts";
+import { logoutControlUi } from "../app/gateway-logout.ts";
 import { nativeGatewaysCapability } from "../app/native-gateways.runtime.ts";
 import type { ThemeMode } from "../app/theme.ts";
 import { t } from "../i18n/index.ts";
@@ -185,6 +186,10 @@ export function renderSidebarIdentityMenu(params: SidebarIdentityMenuParams) {
           case `${COMMAND_VALUE_PREFIX}retry-connect`:
             params.onRetryConnect?.();
             break;
+          case `${COMMAND_VALUE_PREFIX}logout`:
+            // AI Markets: drop this browser's gateway identity and return to connect.
+            logoutControlUi(params.basePath);
+            break;
         }
       }}
       @keydown=${(event: KeyboardEvent) => {
@@ -255,6 +260,13 @@ export function renderSidebarIdentityMenu(params: SidebarIdentityMenuParams) {
               </wa-dropdown-item>`
           : nothing
       }
+      <div class="sidebar-customize-menu__separator" role="separator"></div>
+      <wa-dropdown-item
+        class="sidebar-customize-menu__item sidebar-identity-menu__logout"
+        value="command:logout"
+      >
+        <span class="sidebar-customize-menu__text">${t("common.logout")}</span>
+      </wa-dropdown-item>
       <div class="sidebar-customize-menu__separator" role="separator"></div>
       <div class="sidebar-identity-menu__footer">
         <openclaw-sidebar-build-chip

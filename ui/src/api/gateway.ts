@@ -25,6 +25,10 @@ import type {
 } from "@openclaw/gateway-client/scope-upgrade";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { roleScopesAllow } from "../../../src/shared/operator-scope-compat.js";
+import {
+  isForeignAimarketsSessionError,
+  recoverFromForeignAimarketsSession,
+} from "../app/aimarkets-session-guard.ts";
 import { NativeGatewayAuthUnavailableError } from "../app/native-gateway-auth.ts";
 import { isRemoteControlUiIngress } from "../app/remote-ingress.ts";
 import { formatUiError } from "../lib/format-error.ts";
@@ -180,14 +184,20 @@ export class GatewayBrowserClient {
         return createBrowserGatewaySocket(this.opts.url, handlers, () => this.maxPayloadBytes);
       },
       createRequestId: generateUUID,
-      createRequestError: (error) =>
-        new GatewayRequestError({
+      createRequestError: (error) => {
+        // AI Markets: a stale session selection pointing at another buyer is
+        // dropped and the UI reloads on the buyer's own session.
+        if (isForeignAimarketsSessionError(error.message)) {
+          recoverFromForeignAimarketsSession();
+        }
+        return new GatewayRequestError({
           code: error.code ?? "UNAVAILABLE",
           message: error.message ?? "request failed",
           details: error.details,
           retryable: error.retryable,
           retryAfterMs: error.retryAfterMs,
-        }),
+        });
+      },
       buildConnectPlan: ({ nonce, challengeTs, generation, serverCapabilities }) =>
         this.buildConnectPlan(nonce, challengeTs, generation, serverCapabilities),
       buildConnectParams: (plan) => plan.params,

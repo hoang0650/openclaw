@@ -13,6 +13,7 @@ import {
 } from "../../../src/gateway/control-ui-bootstrap-contract.js";
 import type { GatewayBrowserClientOptions } from "../api/gateway.ts";
 import { inferBasePathFromPathname, sessionRouteNamespaceFromPath } from "../app-route-paths.ts";
+import { isForeignMarketSession } from "./aimarkets-session-guard.ts";
 import { storeAimarketsTicket, syncAimarketsTicketCookie } from "./aimarkets-ticket.ts";
 import { createNativeGatewayConnectAuth } from "./native-gateway-auth.ts";
 import { isRemoteControlUiIngress } from "./remote-ingress.ts";
@@ -192,7 +193,10 @@ export function resolveAimarketsScopedSessionKey(
   if (!current || isPhhotelUnscopedMainSession(current)) {
     return `market-${userId}`;
   }
-  if (!/(?:^|[:/_-])market[:_-]/i.test(current)) {
+  if (
+    !/(?:^|[:/_-])market[:_-]/i.test(current) ||
+    isForeignMarketSession(current, userId.toLowerCase())
+  ) {
     return `market-${userId}`;
   }
   return undefined;
@@ -581,7 +585,8 @@ export function resolveApplicationStartupSettings(
       if (
         !effectiveSession ||
         isPhhotelUnscopedMainSession(effectiveSession) ||
-        !/(?:^|[:/_-])market[:_-]/i.test(effectiveSession)
+        !/(?:^|[:/_-])market[:_-]/i.test(effectiveSession) ||
+        isForeignMarketSession(effectiveSession, resolvedMarketUserId.toLowerCase())
       ) {
         effectiveSession = `market-${resolvedMarketUserId}`;
       }

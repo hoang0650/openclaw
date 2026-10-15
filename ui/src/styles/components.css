@@ -5776,3 +5776,21 @@ td.data-table-key-col {
   display: block;
   line-height: 0;
 }
+
+/* AI Markets: pairing request id and steps must be selectable/copyable. */
+.login-gate__failure-steps,
+.login-gate__failure-summary,
+.login-gate__request-id code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.login-gate__request-id {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.login-gate__request-id code {
+  overflow-wrap: anywhere;
+}

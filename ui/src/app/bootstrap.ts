@@ -35,6 +35,7 @@ import {
 } from "../pages/model-setup/first-run.ts";
 import { ControlUiPluginRuntime } from "../plugins/control-ui-runtime.ts";
 import { createAgentSelectionCapability } from "./agent-selection.ts";
+import { guardAimarketsSessionOnStartup } from "./aimarkets-session-guard.ts";
 import { selectShellRouteState } from "./app-host-route-state.ts";
 import { resolveControlUiDocumentMode, type ControlUiDocumentMode } from "./approval-deep-link.ts";
 import { AssistantDock } from "./assistant-dock.ts";
@@ -61,6 +62,7 @@ import { createApplicationConfigCapability } from "./config.ts";
 import { createConnectionBootstrapCoordinator } from "./connection-bootstrap.ts";
 import type { ApplicationNavigationOptions, ApplicationContext } from "./context.ts";
 import { createScopeUpgradeCapability } from "./device-scope-upgrade.ts";
+import { resetGatewayStateOnAimarketsIdentitySwitch } from "./gateway-logout.ts";
 import { startGatewayPageActivation } from "./gateway-page-activation.ts";
 import { startGatewayPresenceActivity } from "./gateway-presence-activity.ts";
 import { createApplicationGateway } from "./gateway-store.ts";
@@ -121,11 +123,20 @@ type PendingRouterStartNavigation = {
 
 export function bootstrapApplication(): ApplicationRuntime {
   const history = createBrowserHistory();
-  const startupLocation = history.location();
+  const rawStartupLocation = history.location();
+  // AI Markets: a route/param/persisted selection naming another buyer's
+  // market session is replaced by the current buyer's own session.
+  const startupLocation = guardAimarketsSessionOnStartup(rawStartupLocation) ?? rawStartupLocation;
+  if (startupLocation !== rawStartupLocation) {
+    history.replace(startupLocation);
+  }
   const [basePath, resourceBasePath] = resolveControlUiPaths(
     startupLocation.pathname || globalThis.location?.pathname || "/",
   );
   const documentMode = resolveControlUiDocumentMode(startupLocation.pathname, basePath);
+  // AI Markets: a launch link for another buyer must not reuse the previous
+  // buyer's stored token/device/session (runs before settings are loaded).
+  resetGatewayStateOnAimarketsIdentitySwitch(startupLocation);
   const persistedSettings = loadSettings();
   const initialSettings = documentMode
     ? resolvePageGatewaySettings(persistedSettings)
