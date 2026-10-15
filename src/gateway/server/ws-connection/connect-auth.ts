@@ -13,9 +13,9 @@ import {
   deviceBootstrapProfilesEqual,
 } from "../../../shared/device-bootstrap-profile.js";
 import { intersectOperatorScopes } from "../../../shared/operator-scope-compat.js";
+import { shouldSkipAimarketsControlUiPairing } from "../../aimarkets-ticket.js";
 import { captureGatewayAuthPolicy } from "../../auth-policy.js";
 import { AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET } from "../../auth-rate-limit.js";
-import { shouldSkipAimarketsControlUiPairing } from "../../aimarkets-ticket.js";
 import type { GatewayAuthResult } from "../../auth.js";
 import { getRemoteControlUiIngressContext } from "../../ingress-attribution.js";
 import { withSerializedCredentialFallbackAttempt } from "../../rate-limit-attempt-serialization.js";

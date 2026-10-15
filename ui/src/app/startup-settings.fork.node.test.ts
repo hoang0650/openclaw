@@ -97,4 +97,14 @@ describe("fork startup settings", () => {
       resolveAimarketsScopedSessionKey("agent:main:main", `${HEX24}.openclaw.aimarkets.vn`),
     ).toBe(`market-${HEX24}`);
   });
+
+  it("replaces another buyer's market session with the current buyer's own", () => {
+    const other = "fedcba9876543210fedcba98";
+    const host = `${HEX24}.openclaw.aimarkets.vn`;
+    expect(resolveAimarketsScopedSessionKey(`market-${other}`, host)).toBe(`market-${HEX24}`);
+    expect(resolveAimarketsScopedSessionKey(`agent:main:market-${other}`, host)).toBe(
+      `market-${HEX24}`,
+    );
+    expect(resolveAimarketsScopedSessionKey(`market-${HEX24}`, host)).toBeUndefined();
+  });
 });

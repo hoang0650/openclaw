@@ -445,7 +445,10 @@ describe("login gate failure recovery", () => {
   });
 
   it("omits the request id box when the gateway sent no id", async () => {
-    const element = await mountFailure("pairing required", ConnectErrorDetailCodes.PAIRING_REQUIRED);
+    const element = await mountFailure(
+      "pairing required",
+      ConnectErrorDetailCodes.PAIRING_REQUIRED,
+    );
     expect(element.querySelector(".login-gate__request-id")).toBeNull();
   });
 

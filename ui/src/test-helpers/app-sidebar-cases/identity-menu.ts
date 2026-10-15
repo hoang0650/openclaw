@@ -210,7 +210,8 @@ describe("AppSidebar footer identity menu", () => {
     ).toBe("identity");
     expect(menu?.querySelector("openclaw-theme-mode-toggle")).not.toBeNull();
     expect(menu?.textContent).not.toContain("Recent activity");
-    expect(menu?.querySelectorAll(':scope > [role="separator"]')).toHaveLength(4);
+    // AI Markets fork: the Log out item adds one separated group.
+    expect(menu?.querySelectorAll(':scope > [role="separator"]')).toHaveLength(5);
     expect(identity?.querySelector(".sidebar-identity-card__more")).toBeNull();
     expect(identity?.querySelector(".sidebar-identity-card__chevron")).toBeNull();
 
