@@ -18,7 +18,7 @@ vi.mock("../../plugins/provider-hook-runtime.js", () => ({
   resolveProviderRuntimePlugin: () => undefined,
 }));
 
-function buildSafeguardFactories(cfg: OpenClawConfig, workspaceDir?: string) {
+function buildSafeguardFactories(cfg: OpenClawConfig, workspaceDir = "/workspace") {
   // The safeguard runtime attaches to the session manager, so tests keep the
   // same manager instance around for both factory construction and inspection.
   const sessionManager = {} as SessionManager;
@@ -31,8 +31,6 @@ function buildSafeguardFactories(cfg: OpenClawConfig, workspaceDir?: string) {
     cfg,
     sessionManager,
     workspaceDir,
-    provider: "anthropic",
-    modelId: "claude-sonnet-4-20250514",
     model,
   });
 
@@ -47,7 +45,6 @@ function expectSafeguardRuntime(
 
   expect(factories).toContain(compactionSafeguardExtension);
   const runtime = getCompactionSafeguardRuntime(sessionManager);
-  expect(runtime?.contextWindowTokens).toBe(200_000);
   expect(runtime?.qualityGuardEnabled).toBe(expectedRuntime.qualityGuardEnabled);
   expect(runtime?.qualityGuardMaxRetries).toBe(expectedRuntime.qualityGuardMaxRetries);
 }

@@ -1,82 +1,252 @@
-// Google Meet tests cover voice call gateway plugin behavior.
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+import { getMeetingVoiceCallGatewayCall } from "openclaw/plugin-sdk/meeting-runtime";
+import { afterAll, afterEach, beforeEach, expect, it, vi } from "vitest";
 import { resolveGoogleMeetConfig } from "./config.js";
-import {
-  createVoiceCallGateway,
-  endMeetVoiceCallGatewayCall,
-  getMeetVoiceCallGatewayCall,
-  joinMeetViaVoiceCallGateway,
-} from "./voice-call-gateway.js";
+import { createVoiceCallGateway, joinMeetViaVoiceCallGateway } from "./voice-call-gateway.js";
 
-const gatewayMocks = vi.hoisted(() => ({
+type GatewayRuntime = typeof import("openclaw/plugin-sdk/gateway-runtime");
+type GatewayClientOptions = ConstructorParameters<GatewayRuntime["GatewayClient"]>[0];
+type GatewayClientInstance = InstanceType<GatewayRuntime["GatewayClient"]>;
+
+const mocks = vi.hoisted(() => ({
   runtimeRequest: vi.fn(),
   request: vi.fn(),
   stopAndWait: vi.fn(async () => {}),
-  startGatewayClientWhenEventLoopReady: vi.fn(async () => ({ ready: true, aborted: false })),
+  startClient: vi.fn<GatewayRuntime["startGatewayClientWhenEventLoopReady"]>(),
+  autoHello: true,
+  clientOptions: undefined as GatewayClientOptions | undefined,
+  actualGatewayClient: undefined as GatewayRuntime["GatewayClient"] | undefined,
+  actualClients: [] as GatewayClientInstance[],
 }));
 
-vi.mock("openclaw/plugin-sdk/gateway-runtime", () => ({
-  GatewayClient: vi.fn(function MockGatewayClient(params: { onHelloOk?: () => void }) {
-    queueMicrotask(() => params.onHelloOk?.());
+vi.mock("openclaw/plugin-sdk/gateway-runtime", async (importOriginal) => ({
+  ...(await importOriginal<GatewayRuntime>()),
+  GatewayClient: vi.fn(function MockGatewayClient(params: GatewayClientOptions) {
+    mocks.clientOptions = params;
+    if (mocks.actualGatewayClient) {
+      const client = new mocks.actualGatewayClient({ ...params, deviceIdentity: null });
+      mocks.actualClients.push(client);
+      return client;
+    }
+    if (mocks.autoHello) {
+      queueMicrotask(() => params.onHelloOk?.({} as never));
+    }
     return {
-      request: gatewayMocks.request,
-      stopAndWait: gatewayMocks.stopAndWait,
+      request: mocks.request,
+      stopAndWait: mocks.stopAndWait,
     };
   }),
-  startGatewayClientWhenEventLoopReady: gatewayMocks.startGatewayClientWhenEventLoopReady,
+  startGatewayClientWhenEventLoopReady: mocks.startClient,
 }));
 
-describe("Google Meet voice-call gateway", () => {
-  beforeEach(() => {
-    vi.useRealTimers();
-    gatewayMocks.request.mockReset();
-    gatewayMocks.request.mockResolvedValue({ success: true });
-    gatewayMocks.runtimeRequest.mockReset();
-    gatewayMocks.runtimeRequest.mockResolvedValue({ callId: "call-1" });
-    gatewayMocks.stopAndWait.mockClear();
-    gatewayMocks.startGatewayClientWhenEventLoopReady.mockClear();
+function voiceConfig(
+  voiceCall: Partial<ReturnType<typeof resolveGoogleMeetConfig>["voiceCall"]> = {},
+) {
+  return resolveGoogleMeetConfig({
+    voiceCall: { gatewayUrl: "wss://voice.example.test", ...voiceCall },
   });
-
-  afterEach(() => {
-    vi.useRealTimers();
+}
+function createGateway(config = voiceConfig()) {
+  return createVoiceCallGateway({
+    config,
+    runtime: { gateway: { request: mocks.runtimeRequest } } as never,
   });
-
-  afterAll(() => {
-    vi.doUnmock("openclaw/plugin-sdk/gateway-runtime");
-    vi.resetModules();
+}
+function getCall(gateway = createGateway()) {
+  return getMeetingVoiceCallGatewayCall({ gateway, callId: "call-1" });
+}
+function join(
+  config = voiceConfig(),
+  options: Partial<Parameters<typeof joinMeetViaVoiceCallGateway>[0]> = {},
+) {
+  return joinMeetViaVoiceCallGateway({
+    config,
+    gateway: createGateway(config),
+    dialInNumber: "+15551234567",
+    ...options,
   });
+}
+function expectStartupStopped() {
+  expect(mocks.stopAndWait).toHaveBeenCalledOnce();
+  expect(mocks.startClient.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+}
 
-  it("starts Twilio Meet calls with pre-connect DTMF, then speaks the intro without TwiML fallback", async () => {
-    const config = resolveGoogleMeetConfig({
-      voiceCall: {
-        gatewayUrl: "ws://127.0.0.1:18789",
-        dtmfDelayMs: 1,
-        postDtmfSpeechDelayMs: 2,
-      },
-      realtime: { introMessage: "Say exactly: I'm here and listening." },
+beforeEach(() => {
+  vi.useRealTimers();
+  mocks.request.mockReset().mockResolvedValue({ success: true });
+  mocks.runtimeRequest.mockReset().mockResolvedValue({ callId: "call-1" });
+  mocks.stopAndWait.mockReset().mockResolvedValue(undefined);
+  mocks.startClient.mockReset().mockResolvedValue({
+    ready: true,
+    aborted: false,
+    elapsedMs: 0,
+    maxDriftMs: 0,
+    checks: 1,
+  });
+  mocks.autoHello = true;
+  mocks.clientOptions = undefined;
+  mocks.actualGatewayClient = undefined;
+  mocks.actualClients.length = 0;
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+afterAll(() => {
+  vi.doUnmock("openclaw/plugin-sdk/gateway-runtime");
+  vi.resetModules();
+});
+
+it("stops the real gateway client's referenced reconnect after a localhost connection fails", async () => {
+  const actual = await vi.importActual<GatewayRuntime>("openclaw/plugin-sdk/gateway-runtime");
+  mocks.actualGatewayClient = actual.GatewayClient;
+  mocks.startClient.mockImplementation((client, options) =>
+    actual.startGatewayClientWhenEventLoopReady(
+      client as Parameters<GatewayRuntime["startGatewayClientWhenEventLoopReady"]>[0],
+      options,
+    ),
+  );
+
+  const server = createServer();
+  let connectionCount = 0;
+  server.on("upgrade", (_request, socket) => {
+    connectionCount += 1;
+    socket.destroy();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("localhost gateway server did not receive a TCP port");
+  }
+
+  // Control readiness and deadlines while socket I/O and setImmediate stay real.
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  const stopAndWait = vi.spyOn(actual.GatewayClient.prototype, "stopAndWait");
+  const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+  const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+  try {
+    const config = voiceConfig({
+      gatewayUrl: `ws://127.0.0.1:${address.port}`,
+      requestTimeoutMs: 3_000,
+    });
+    const gateway = createGateway(config);
+
+    const rejected = expect(getCall(gateway)).rejects.toMatchObject({
+      code: "ECONNRESET",
+      message: "socket hang up",
+    });
+    await vi.advanceTimersByTimeAsync(2);
+    await rejected;
+    expect(mocks.actualClients).toHaveLength(1);
+
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    const referencedRetry = setTimeoutSpy.mock.calls.some(([, delay], index) => {
+      const timer = setTimeoutSpy.mock.results[index]?.value as NodeJS.Timeout | undefined;
+      return (
+        delay === 1_000 &&
+        timer?.hasRef() === true &&
+        !clearTimeoutSpy.mock.calls.some(([cleared]) => cleared === timer)
+      );
     });
 
-    gatewayMocks.request
-      .mockResolvedValueOnce({ callId: "call-1" })
-      .mockResolvedValueOnce({ success: true });
-    const gateway = createVoiceCallGateway({
-      config,
-      runtime: { gateway: { request: gatewayMocks.runtimeRequest } } as never,
+    expect({
+      stopCalls: stopAndWait.mock.calls.length,
+      connectionCount,
+      referencedRetry,
+    }).toEqual({
+      stopCalls: 1,
+      connectionCount: 1,
+      referencedRetry: false,
     });
-    const join = joinMeetViaVoiceCallGateway({
-      config,
-      gateway,
-      dialInNumber: "+15551234567",
-      dtmfSequence: "123456#",
-      message: "Say exactly: I'm here and listening.",
-      requesterSessionKey: "agent:main:discord:channel:general",
-      sessionKey: "voice:google-meet:meet-1",
+    expect(mocks.runtimeRequest).not.toHaveBeenCalled();
+  } finally {
+    await Promise.all(mocks.actualClients.map((client) => client.stopAndWait()));
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
     });
+  }
+});
 
-    await join;
+const connectionError = new Error("external voice gateway refused the connection");
+it.each([
+  [
+    "connection",
+    connectionError,
+    () => mocks.stopAndWait.mockRejectedValueOnce(new Error("gateway teardown failed")),
+    () => mocks.clientOptions?.onConnectError?.(connectionError),
+  ],
+  [
+    "readiness",
+    "gateway event loop readiness timeout",
+    () =>
+      mocks.startClient.mockResolvedValueOnce({
+        ready: false,
+        aborted: false,
+        elapsedMs: 0,
+        maxDriftMs: 0,
+        checks: 1,
+      }),
+    () => {},
+  ],
+  [
+    "deadline",
+    "gateway connect timeout",
+    () => vi.useFakeTimers(),
+    () => vi.advanceTimersByTimeAsync(25),
+  ],
+] satisfies Array<[string, Error | string, () => unknown, () => unknown]>)(
+  "cleans up a failed %s without losing its error",
+  async (failure, expected, prepare, settle) => {
+    mocks.autoHello = false;
+    prepare();
+    const request = getCall(
+      createGateway(failure === "deadline" ? voiceConfig({ requestTimeoutMs: 25 }) : undefined),
+    );
+    const rejected =
+      expected instanceof Error
+        ? expect(request).rejects.toBe(expected)
+        : expect(request).rejects.toThrow(expected);
+    await settle();
+    await rejected;
+    expectStartupStopped();
+    if (failure === "connection") {
+      expect(mocks.request).not.toHaveBeenCalled();
+    }
+    if (failure === "deadline") {
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  },
+);
 
-    expect(gatewayMocks.request).toHaveBeenNthCalledWith(
-      1,
+it("starts Twilio Meet calls with pre-connect DTMF, then speaks the intro without TwiML fallback", async () => {
+  const config = resolveGoogleMeetConfig({
+    voiceCall: {
+      gatewayUrl: "ws://127.0.0.1:18789",
+      dtmfDelayMs: 1,
+      postDtmfSpeechDelayMs: 2,
+    },
+    realtime: { introMessage: "Say exactly: I'm here and listening." },
+  });
+
+  mocks.request
+    .mockResolvedValueOnce({ callId: "call-1" })
+    .mockResolvedValueOnce({ success: true });
+  await join(config, {
+    dtmfSequence: "123456#",
+    message: "Say exactly: I'm here and listening.",
+    requesterSessionKey: "agent:main:discord:channel:general",
+    sessionKey: "voice:google-meet:meet-1",
+  });
+
+  expect(mocks.request.mock.calls).toEqual([
+    [
       "voicecall.start",
       {
         to: "+15551234567",
@@ -86,9 +256,8 @@ describe("Google Meet voice-call gateway", () => {
         sessionKey: "voice:google-meet:meet-1",
       },
       { timeoutMs: 30_000 },
-    );
-    expect(gatewayMocks.request).toHaveBeenNthCalledWith(
-      2,
+    ],
+    [
       "voicecall.speak",
       {
         callId: "call-1",
@@ -96,153 +265,21 @@ describe("Google Meet voice-call gateway", () => {
         message: "Say exactly: I'm here and listening.",
       },
       { timeoutMs: 30_000 },
-    );
-    expect(gatewayMocks.request).toHaveBeenCalledTimes(2);
-    expect(gatewayMocks.runtimeRequest).not.toHaveBeenCalled();
-  });
+    ],
+  ]);
+  expect(mocks.runtimeRequest).not.toHaveBeenCalled();
+});
 
-  it("skips the intro without failing when the realtime bridge is not ready", async () => {
-    gatewayMocks.request.mockResolvedValueOnce({ callId: "call-1" }).mockResolvedValueOnce({
-      success: false,
-      error: "No active realtime bridge for call",
-    });
-    const config = resolveGoogleMeetConfig({
-      voiceCall: {
-        gatewayUrl: "wss://voice.example.test",
-        dtmfDelayMs: 1,
-        postDtmfSpeechDelayMs: 1,
-      },
-    });
-    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+it("rejects per-agent routing through an external Voice Call gateway", async () => {
+  await expect(join(undefined, { agentId: "support" })).rejects.toThrow(
+    "requires the local Gateway runtime",
+  );
+  expect(mocks.request).not.toHaveBeenCalled();
+});
 
-    const gateway = createVoiceCallGateway({
-      config,
-      runtime: { gateway: { request: gatewayMocks.runtimeRequest } } as never,
-    });
-    const result = await joinMeetViaVoiceCallGateway({
-      config,
-      gateway,
-      dialInNumber: "+15551234567",
-      dtmfSequence: "123456#",
-      logger,
-      message: "Say exactly: I'm here and listening.",
-    });
-
-    expect(result.callId).toBe("call-1");
-    expect(result.dtmfSent).toBe(true);
-    expect(result.introSent).toBe(false);
-    expect(logger.warn).toHaveBeenCalledWith(
-      "[google-meet] Skipped intro speech because realtime bridge was not ready: No active realtime bridge for call",
-    );
-  });
-
-  it("routes the call through the originating agent", async () => {
-    const config = resolveGoogleMeetConfig({});
-    const gateway = createVoiceCallGateway({
-      config,
-      runtime: { gateway: { request: gatewayMocks.runtimeRequest } } as never,
-    });
-
-    await joinMeetViaVoiceCallGateway({
-      config,
-      gateway,
-      dialInNumber: "+15551234567",
-      agentId: "support",
-      sessionKey: "agent:support:google-meet:meet-1",
-    });
-
-    expect(gatewayMocks.runtimeRequest).toHaveBeenCalledWith(
-      "voicecall.start",
-      expect.objectContaining({
-        agentId: "support",
-        sessionKey: "agent:support:google-meet:meet-1",
-      }),
-      { timeoutMs: 30_000 },
-    );
-  });
-
-  it("rejects per-agent routing through an external Voice Call gateway", async () => {
-    const config = resolveGoogleMeetConfig({
-      voiceCall: { gatewayUrl: "wss://voice.example.test" },
-    });
-    const gateway = createVoiceCallGateway({
-      config,
-      runtime: { gateway: { request: gatewayMocks.runtimeRequest } } as never,
-    });
-
-    await expect(
-      joinMeetViaVoiceCallGateway({
-        config,
-        gateway,
-        dialInNumber: "+15551234567",
-        agentId: "support",
-      }),
-    ).rejects.toThrow("requires the local Gateway runtime");
-    expect(gatewayMocks.request).not.toHaveBeenCalled();
-  });
-
-  it("treats missing delegated calls as already ended", async () => {
-    gatewayMocks.request.mockRejectedValueOnce(new Error("Call not found"));
-    const config = resolveGoogleMeetConfig({
-      voiceCall: { gatewayUrl: "wss://voice.example.test" },
-    });
-
-    const gateway = createVoiceCallGateway({
-      config,
-      runtime: { gateway: { request: gatewayMocks.runtimeRequest } } as never,
-    });
-
-    await expect(
-      endMeetVoiceCallGatewayCall({ gateway, callId: "call-1" }),
-    ).resolves.toBeUndefined();
-
-    expect(gatewayMocks.request).toHaveBeenCalledWith(
-      "voicecall.end",
-      { callId: "call-1" },
-      { timeoutMs: 30_000 },
-    );
-  });
-
-  it("reads delegated call status from the gateway", async () => {
-    gatewayMocks.request.mockResolvedValueOnce({ found: false });
-    const config = resolveGoogleMeetConfig({
-      voiceCall: { gatewayUrl: "wss://voice.example.test" },
-    });
-
-    const gateway = createVoiceCallGateway({
-      config,
-      runtime: { gateway: { request: gatewayMocks.runtimeRequest } } as never,
-    });
-
-    await expect(getMeetVoiceCallGatewayCall({ gateway, callId: "call-1" })).resolves.toEqual({
-      found: false,
-    });
-
-    expect(gatewayMocks.request).toHaveBeenCalledWith(
-      "voicecall.status",
-      { callId: "call-1" },
-      { timeoutMs: 30_000 },
-    );
-  });
-
-  it("preserves a successful mutating RPC result when client teardown fails", async () => {
-    gatewayMocks.request.mockResolvedValueOnce({ callId: "call-1" });
-    gatewayMocks.stopAndWait.mockRejectedValueOnce(new Error("gateway teardown failed"));
-    const config = resolveGoogleMeetConfig({
-      voiceCall: { gatewayUrl: "wss://voice.example.test" },
-    });
-    const gateway = createVoiceCallGateway({
-      config,
-      runtime: { gateway: { request: gatewayMocks.runtimeRequest } } as never,
-    });
-
-    await expect(
-      joinMeetViaVoiceCallGateway({
-        config,
-        gateway,
-        dialInNumber: "+15551234567",
-      }),
-    ).resolves.toMatchObject({ callId: "call-1" });
-    expect(gatewayMocks.stopAndWait).toHaveBeenCalledOnce();
-  });
+it("preserves a successful mutating RPC result when client teardown fails", async () => {
+  mocks.request.mockResolvedValueOnce({ callId: "call-1" });
+  mocks.stopAndWait.mockRejectedValueOnce(new Error("gateway teardown failed"));
+  await expect(join()).resolves.toMatchObject({ callId: "call-1" });
+  expect(mocks.stopAndWait).toHaveBeenCalledOnce();
 });

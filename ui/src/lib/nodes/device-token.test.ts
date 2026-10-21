@@ -1,46 +1,32 @@
 /* @vitest-environment jsdom */
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred as deferred } from "../../../../test/helpers/promise.js";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import {
   clearDeviceAuthToken,
+  loadCurrentDeviceAuthToken,
   loadDeviceAuthToken,
-  revokeDeviceToken,
-  rotateDeviceToken,
+  peekStoredDeviceIdentityId,
   storeDeviceAuthToken,
 } from "./index.ts";
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((nextResolve) => {
-    resolve = nextResolve;
-  });
-  return { promise, resolve };
-}
+import { createInitialDevicesState, rotateDeviceToken } from "./page-operations.ts";
 
 function createState(request: (method: string, params?: unknown) => Promise<unknown>) {
   return {
-    client: {
-      request: request as <T = unknown>(method: string, params?: unknown) => Promise<T>,
-    },
-    connected: true,
+    ...createInitialDevicesState({
+      client: {
+        request: request as <T = unknown>(method: string, params?: unknown) => Promise<T>,
+      },
+      connected: true,
+    }),
     requestGeneration: 1,
-    devicesLoading: false,
-    devicesError: null,
-    devicesList: null,
   };
 }
 
-function storeIdentity() {
+function storeIdentity(deviceId = "00") {
   localStorage.setItem(
     "openclaw-device-identity-v1",
-    JSON.stringify({
-      version: 1,
-      deviceId: "00",
-      publicKey: "AA",
-      privateKey: "AA",
-      createdAtMs: 1,
-    }),
+    JSON.stringify({ version: 1, deviceId, publicKey: "AA", privateKey: "AA", createdAtMs: 1 }),
   );
 }
 
@@ -51,10 +37,14 @@ function deferIdentityFingerprint() {
   return { digest, digestMock };
 }
 
-const tokenParams = {
-  deviceId: "00",
-  gatewayUrl: "wss://gateway.test",
-  role: "operator",
+const tokenParams = { deviceId: "00", gatewayUrl: "wss://gateway.test", role: "operator" };
+
+// Keep all required fields so malformed cases fail at the intended validation boundary.
+const rotationResult = {
+  deviceId: tokenParams.deviceId,
+  role: tokenParams.role,
+  scopes: [],
+  rotatedAtMs: 1_700_000_000_000,
 };
 
 function storedTokenKey(): string {
@@ -67,70 +57,162 @@ function storedTokenKey(): string {
   return key;
 }
 
+function storeToken(overrides: Partial<Parameters<typeof storeDeviceAuthToken>[0]> = {}) {
+  return storeDeviceAuthToken({
+    ...tokenParams,
+    token: "current-token",
+    scopes: ["operator.read"],
+    ...overrides,
+  });
+}
+
+function seedTokenStore(tokens: unknown) {
+  localStorage.setItem(storedTokenKey(), JSON.stringify({ version: 1, deviceId: "00", tokens }));
+}
+
 beforeEach(() => {
   vi.stubGlobal("localStorage", createStorageMock());
 });
-
 afterEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
+describe("current browser device token", () => {
+  it("keeps credentials scoped to the requested Gateway route", () => {
+    storeIdentity();
+    const gatewayUrl = `${tokenParams.gatewayUrl}/first`;
+    storeToken({ gatewayUrl, token: "first-token" });
+    expect(loadCurrentDeviceAuthToken(`${tokenParams.gatewayUrl}/second`)).toBeNull();
+    expect(loadCurrentDeviceAuthToken(gatewayUrl)).toBe("first-token");
+  });
+
+  it.each([null, "another-device"])(
+    "rejects an old device credential when the current identity is %s",
+    (deviceId) => {
+      if (deviceId) {
+        storeIdentity(deviceId);
+      }
+      storeToken({ token: "old-token" });
+      expect(loadCurrentDeviceAuthToken(tokenParams.gatewayUrl)).toBeNull();
+    },
+  );
+
+  it("rejects a credential that cannot read private content", () => {
+    storeIdentity();
+    storeToken({ token: "approval-only-token", scopes: ["operator.approvals"] });
+    expect(loadCurrentDeviceAuthToken(tokenParams.gatewayUrl)).toBeNull();
+  });
+});
+
+describe("peekStoredDeviceIdentityId", () => {
+  it("reads the stored device id without minting or fingerprint-verifying an identity", () => {
+    // A hanging digest catches accidental verification on the synchronous render path.
+    const { digestMock } = deferIdentityFingerprint();
+    storeIdentity();
+    expect(peekStoredDeviceIdentityId()).toBe("00");
+    expect(digestMock).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(1);
+  });
+
+  it.each([
+    { name: "no stored identity", raw: null },
+    { name: "malformed JSON", raw: "{not-json" },
+    { name: "unsupported version", raw: JSON.stringify({ version: 2, deviceId: "00" }) },
+    { name: "missing device id", raw: JSON.stringify({ version: 1 }) },
+  ])("returns null for $name without creating one", ({ raw }) => {
+    if (raw !== null) {
+      localStorage.setItem("openclaw-device-identity-v1", raw);
+    }
+    const before = localStorage.length;
+    expect(peekStoredDeviceIdentityId()).toBeNull();
+    expect(localStorage.length).toBe(before);
+  });
+});
+
 describe("device token request lifecycle", () => {
-  it("does not reveal or persist a rotate response from a retired request epoch", async () => {
+  // Rotation kills the previous token, so reconnects must not discard its replacement.
+  it("persists a rotate response after its request epoch retires before success", async () => {
+    storeIdentity();
+    const { digest, digestMock } = deferIdentityFingerprint();
     const response = deferred<unknown>();
     const state = createState(() => response.promise);
-    const prompt = vi.spyOn(window, "prompt").mockImplementation(() => null);
-
     const operation = rotateDeviceToken(state, tokenParams);
     state.requestGeneration += 1;
-    response.resolve({ token: "stale-token", ...tokenParams });
-    await operation;
-
-    expect(prompt).not.toHaveBeenCalled();
+    response.resolve({ token: "rotated-token", tokenDelivery: "in-band", ...rotationResult });
+    await vi.waitFor(() => expect(digestMock).toHaveBeenCalledOnce());
+    digest.resolve(new Uint8Array([0]).buffer);
+    expect(await operation).toEqual({ delivery: "in-band", token: "rotated-token" });
+    expect(loadDeviceAuthToken(tokenParams)?.token).toBe("rotated-token");
+  });
+  it("reports a cross-device rotation the Gateway withheld the token for", async () => {
+    const state = createState(async () => ({
+      ...rotationResult,
+      deviceId: " 00 ",
+      role: "operator ",
+      tokenDelivery: "withheld-cross-device",
+    }));
+    expect(await rotateDeviceToken(state, tokenParams)).toEqual({
+      delivery: "withheld-cross-device",
+    });
     expect(loadDeviceAuthToken(tokenParams)).toBeNull();
   });
 
-  it("rechecks rotate ownership after loading the local identity", async () => {
+  it("classifies a rotate response from a Gateway that omits tokenDelivery", async () => {
     storeIdentity();
     const { digest, digestMock } = deferIdentityFingerprint();
-    const state = createState(async () => ({ token: "stale-token", ...tokenParams }));
-    const prompt = vi.spyOn(window, "prompt").mockImplementation(() => null);
-
+    const state = createState(async () => ({ token: "legacy-token", ...rotationResult }));
     const operation = rotateDeviceToken(state, tokenParams);
     await vi.waitFor(() => expect(digestMock).toHaveBeenCalledOnce());
     state.requestGeneration += 1;
     digest.resolve(new Uint8Array([0]).buffer);
-    await operation;
-
-    expect(prompt).not.toHaveBeenCalled();
-    expect(loadDeviceAuthToken(tokenParams)).toBeNull();
+    expect(await operation).toEqual({ delivery: "in-band", token: "legacy-token" });
   });
 
-  it("does not clear a current token when a revoke request retires during identity loading", async () => {
-    storeIdentity();
-    storeDeviceAuthToken({ ...tokenParams, token: "current-token", scopes: ["operator.read"] });
-    const { digest, digestMock } = deferIdentityFingerprint();
-    const state = createState(async () => ({}));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("classifies a tokenless response from a Gateway that omits tokenDelivery", async () => {
+    const state = createState(async () => ({ ...rotationResult }));
+    expect(await rotateDeviceToken(state, tokenParams)).toEqual({
+      delivery: "withheld-cross-device",
+    });
+  });
 
-    const operation = revokeDeviceToken(state, tokenParams);
-    await vi.waitFor(() => expect(digestMock).toHaveBeenCalledOnce());
-    state.requestGeneration += 1;
-    digest.resolve(new Uint8Array([0]).buffer);
-    await operation;
-
-    expect(loadDeviceAuthToken(tokenParams)?.token).toBe("current-token");
+  // Reject contradictory delivery and malformed/mismatched grants before reporting success.
+  it.each([
+    ["in-band without a token", { ...rotationResult, tokenDelivery: "in-band" }],
+    [
+      "withheld with a token",
+      { ...rotationResult, tokenDelivery: "withheld-cross-device", token: "unexpected-token" },
+    ],
+    [
+      "unknown delivery",
+      { ...rotationResult, tokenDelivery: "out-of-band", token: "rotated-token" },
+    ],
+    [
+      "withheld with a blank token",
+      { ...rotationResult, tokenDelivery: "withheld-cross-device", token: "" },
+    ],
+    ["a blank token with no delivery field", { ...rotationResult, token: "" }],
+    ["a null payload", null],
+    ["a scalar payload", "rotated"],
+    ["an empty object", {}],
+    ["an array payload", []],
+    ["a payload naming no role", { deviceId: "00" }],
+    ["a payload omitting scopes", { deviceId: "00", role: "operator", rotatedAtMs: 1 }],
+    ["a payload omitting rotatedAtMs", { deviceId: "00", role: "operator", scopes: [] }],
+    ["a fractional timestamp", { ...rotationResult, rotatedAtMs: 1.5 }],
+    ["a payload carrying a blank scope", { ...rotationResult, scopes: [""] }],
+    ["a payload naming a different device", { ...rotationResult, deviceId: "01" }],
+    ["a payload naming a different role", { ...rotationResult, role: "viewer" }],
+  ])("refuses %s", async (_label, response) => {
+    const state = createState(async () => response);
+    expect(await rotateDeviceToken(state, tokenParams)).toBeNull();
+    expect(state.devicesError).toContain("unusable result");
+    expect(loadDeviceAuthToken(tokenParams)).toBeNull();
   });
 
   it("normalizes malformed persisted scopes without breaking token loading", () => {
-    storeDeviceAuthToken({ ...tokenParams, token: "current-token", scopes: [] });
-    const key = storedTokenKey();
-    const store = JSON.parse(localStorage.getItem(key) ?? "null");
-    store.tokens.operator.scopes = "not-an-array";
-    localStorage.setItem(key, JSON.stringify(store));
-
+    seedTokenStore({ operator: { ...storeToken({ scopes: [] }), scopes: "not-an-array" } });
     expect(loadDeviceAuthToken(tokenParams)).toMatchObject({
       token: "current-token",
       scopes: [],
@@ -138,31 +220,15 @@ describe("device token request lifecycle", () => {
   });
 
   it("canonicalizes persisted role aliases before storing another token", () => {
-    storeDeviceAuthToken({ ...tokenParams, token: "operator-token", scopes: [] });
-    const key = storedTokenKey();
-    const store = JSON.parse(localStorage.getItem(key) ?? "null");
-    store.tokens = { " operator ": store.tokens.operator };
-    localStorage.setItem(key, JSON.stringify(store));
-
-    storeDeviceAuthToken({
-      ...tokenParams,
-      role: "node",
-      token: "node-token",
-      scopes: ["node.invoke"],
-    });
-
+    seedTokenStore({ " operator ": storeToken({ token: "operator-token", scopes: [] }) });
+    storeToken({ role: "node", token: "node-token", scopes: ["node.invoke"] });
     expect(loadDeviceAuthToken(tokenParams)?.token).toBe("operator-token");
   });
 
   it("removes persisted role aliases when clearing a token", () => {
-    storeDeviceAuthToken({ ...tokenParams, token: "operator-token", scopes: [] });
-    const key = storedTokenKey();
-    const store = JSON.parse(localStorage.getItem(key) ?? "null");
-    store.tokens[" operator "] = store.tokens.operator;
-    localStorage.setItem(key, JSON.stringify(store));
-
+    const token = storeToken({ token: "operator-token", scopes: [] });
+    seedTokenStore({ operator: token, " operator ": token });
     clearDeviceAuthToken(tokenParams);
-
     expect(loadDeviceAuthToken(tokenParams)).toBeNull();
   });
 });

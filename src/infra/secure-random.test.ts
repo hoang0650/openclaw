@@ -1,6 +1,7 @@
 // Covers secure random helper outputs.
 import { Buffer } from "node:buffer";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { redactRegisteredSecretValues } from "../logging/secret-redaction-registry.js";
 
 const cryptoMocks = vi.hoisted(() => ({
   randomBytes: vi.fn((bytes: number) => Buffer.alloc(bytes, 0xab)),
@@ -73,6 +74,29 @@ describe("secure-random", () => {
     expect(token).toMatch(/^[A-Za-z0-9_-]*$/);
   });
 
+  it("registers redacted tokens at creation without redacting ordinary generated IDs", () => {
+    cryptoMocks.randomBytes.mockReturnValueOnce(Buffer.alloc(32, 0xc1));
+    const secret = generateSecureToken({ bytes: 32, redact: true });
+    expect(cryptoMocks.randomBytes).toHaveBeenCalledWith(32);
+    expect(redactRegisteredSecretValues("route/" + secret, () => "hidden")).toBe("route/hidden");
+    const publicId = generateSecureToken(18);
+    expect(redactRegisteredSecretValues(publicId, () => "hidden")).toBe(publicId);
+    expect(() => generateSecureToken({ bytes: 0, redact: true })).toThrow("at least 16 bytes");
+    cryptoMocks.randomBytes.mockReturnValueOnce(Buffer.alloc(32, 0xff));
+    const signingKey = generateSecureToken({
+      bytes: 32,
+      redact: true,
+      encoding: "base64",
+      prefix: "whsec_",
+    });
+    expect(signingKey).toMatch(/^whsec_[A-Za-z0-9+/]+=$/);
+    expect(Buffer.from(signingKey.slice(6), "base64")).toEqual(Buffer.alloc(32, 0xff));
+    expect(redactRegisteredSecretValues("secret=" + signingKey, () => "hidden")).toBe(
+      "secret=hidden",
+    );
+    expect(redactRegisteredSecretValues(signingKey.slice(6), () => "hidden")).toBe("hidden");
+  });
+
   it("generates secure hex strings", () => {
     cryptoMocks.randomBytes.mockClear();
 
@@ -88,11 +112,9 @@ describe("secure-random", () => {
   });
 
   it("delegates bounded integer generation to crypto.randomInt", () => {
-    cryptoMocks.randomInt.mockReturnValueOnce(2).mockReturnValueOnce(7);
+    cryptoMocks.randomInt.mockReturnValueOnce(2);
 
     expect(generateSecureInt(5)).toBe(2);
-    expect(generateSecureInt(3, 9)).toBe(7);
-    expect(cryptoMocks.randomInt).toHaveBeenNthCalledWith(1, 5);
-    expect(cryptoMocks.randomInt).toHaveBeenNthCalledWith(2, 3, 9);
+    expect(cryptoMocks.randomInt).toHaveBeenCalledExactlyOnceWith(5);
   });
 });

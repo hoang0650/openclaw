@@ -1,9 +1,7 @@
-// Resolves package version metadata for CLI and library callers.
 import { createRequire } from "node:module";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { resolveLoadedCommitHash } from "./infra/git-commit.js";
 
-// oxlint-disable-next-line eslint/no-underscore-dangle -- Bundled builds replace this compile-time define identifier.
-declare const __OPENCLAW_VERSION__: string | undefined;
 const CORE_PACKAGE_NAME = "openclaw";
 
 const PACKAGE_JSON_CANDIDATES = [
@@ -19,24 +17,29 @@ const BUILD_INFO_CANDIDATES = [
   "./build-info.json",
 ] as const;
 
-function readVersionFromJsonCandidates(
+function readStringFromJsonCandidates(
   moduleUrl: string,
   candidates: readonly string[],
-  opts: { requirePackageName?: boolean } = {},
+  field: "version" | "buildId",
+  requirePackageName = false,
 ): string | null {
   try {
     const require = createRequire(moduleUrl);
     for (const candidate of candidates) {
       try {
-        const parsed = require(candidate) as { name?: string; version?: string };
-        const version = normalizeOptionalString(parsed.version);
-        if (!version) {
+        const parsed = require(candidate) as {
+          name?: unknown;
+          version?: unknown;
+          buildId?: unknown;
+        };
+        const value = normalizeOptionalString(parsed[field]);
+        if (!value || (field === "buildId" && value.length > 96)) {
           continue;
         }
-        if (opts.requirePackageName && parsed.name !== CORE_PACKAGE_NAME) {
+        if (requirePackageName && parsed.name !== CORE_PACKAGE_NAME) {
           continue;
         }
-        return version;
+        return value;
       } catch {
         // ignore missing or unreadable candidate
       }
@@ -57,35 +60,34 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
   return undefined;
 }
 
-function readInjectedVersion(): string | undefined {
-  return typeof __OPENCLAW_VERSION__ === "string" ? __OPENCLAW_VERSION__ : undefined;
-}
-
 export function readVersionFromPackageJsonForModuleUrl(moduleUrl: string): string | null {
-  return readVersionFromJsonCandidates(moduleUrl, PACKAGE_JSON_CANDIDATES, {
-    requirePackageName: true,
-  });
+  return readStringFromJsonCandidates(moduleUrl, PACKAGE_JSON_CANDIDATES, "version", true);
 }
 
 export function readVersionFromBuildInfoForModuleUrl(moduleUrl: string): string | null {
-  return readVersionFromJsonCandidates(moduleUrl, BUILD_INFO_CANDIDATES);
+  return readStringFromJsonCandidates(moduleUrl, BUILD_INFO_CANDIDATES, "version");
+}
+
+export function readBuildIdFromBuildInfoForModuleUrl(moduleUrl: string): string | null {
+  return readStringFromJsonCandidates(moduleUrl, BUILD_INFO_CANDIDATES, "buildId");
 }
 
 export function resolveVersionFromModuleUrl(moduleUrl: string): string | null {
+  // build-info.json records the version this artifact was built from, so it wins:
+  // a git checkout whose source moved ahead of dist must not report the unbuilt
+  // source version. Source runs have no build-info and fall back to package.json.
   return (
-    readVersionFromPackageJsonForModuleUrl(moduleUrl) ||
-    readVersionFromBuildInfoForModuleUrl(moduleUrl)
+    readVersionFromBuildInfoForModuleUrl(moduleUrl) ||
+    readVersionFromPackageJsonForModuleUrl(moduleUrl)
   );
 }
 
 export function resolveBinaryVersion(params: {
   moduleUrl: string;
-  injectedVersion?: string;
   bundledVersion?: string;
   fallback?: string;
 }): string {
   return (
-    firstNonEmpty(params.injectedVersion) ||
     resolveVersionFromModuleUrl(params.moduleUrl) ||
     firstNonEmpty(params.bundledVersion) ||
     params.fallback ||
@@ -97,13 +99,13 @@ export type RuntimeVersionEnv = {
   [key: string]: string | undefined;
 };
 
-export const RUNTIME_SERVICE_VERSION_FALLBACK = "unknown";
+const RUNTIME_SERVICE_VERSION_FALLBACK = "unknown";
 type RuntimeVersionPreference = "env-first" | "runtime-first";
 
 export function resolveUsableRuntimeVersion(version: string | undefined): string | undefined {
   const trimmed = normalizeOptionalString(version);
   // "0.0.0" is the resolver's hard fallback when module metadata cannot be read.
-  // Prefer explicit service/package markers in that edge case.
+  // Prefer explicit runtime/package markers in that edge case.
   if (!trimmed || trimmed === "0.0.0") {
     return undefined;
   }
@@ -121,11 +123,7 @@ function resolveVersionFromRuntimeSources(params: {
       ? [params.env["OPENCLAW_VERSION"], params.runtimeVersion]
       : [params.runtimeVersion, params.env["OPENCLAW_VERSION"]];
   return (
-    firstNonEmpty(
-      ...preferredCandidates,
-      params.env["OPENCLAW_SERVICE_VERSION"],
-      params.env["npm_package_version"],
-    ) ?? params.fallback
+    firstNonEmpty(...preferredCandidates, params.env["npm_package_version"]) ?? params.fallback
   );
 }
 
@@ -139,6 +137,19 @@ export function resolveRuntimeServiceVersion(
     fallback,
     preference: "env-first",
   });
+}
+
+// Loaded build provenance is immutable for a process. Resolve it once so a
+// checkout update cannot change the identity reported by the running service.
+const RUNTIME_SERVICE_BUILD_ID = readBuildIdFromBuildInfoForModuleUrl(import.meta.url);
+const RUNTIME_SERVICE_COMMIT = resolveLoadedCommitHash({ moduleUrl: import.meta.url });
+
+export function resolveRuntimeServiceBuildId(): string | null {
+  return RUNTIME_SERVICE_BUILD_ID;
+}
+
+export function resolveRuntimeServiceCommit(): string | null {
+  return RUNTIME_SERVICE_COMMIT;
 }
 
 export function resolveCompatibilityHostVersion(
@@ -158,10 +169,9 @@ export function resolveCompatibilityHostVersion(
 }
 
 // Single source of truth for the current OpenClaw version.
-// - Embedded/bundled builds: injected define or env var.
+// - Embedded/bundled builds: bundled-version env var.
 // - Dev/npm builds: package.json.
 export const VERSION = resolveBinaryVersion({
   moduleUrl: import.meta.url,
-  injectedVersion: readInjectedVersion(),
   bundledVersion: process.env.OPENCLAW_BUNDLED_VERSION,
 });

@@ -1,9 +1,9 @@
-// Tests heartbeat event emission and listener cleanup.
+// Tests heartbeat event emission and Gateway callback cleanup.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   emitHeartbeatEvent,
   getLastHeartbeatEvent,
-  onHeartbeatEvent,
+  heartbeatNotifications,
   resetHeartbeatEventsForTest,
   resolveIndicatorType,
 } from "./heartbeat-events.js";
@@ -37,35 +37,63 @@ describe("heartbeat events", () => {
     vi.useRealTimers();
   });
 
-  it("stores the last event and timestamps emitted payloads", () => {
-    emitHeartbeatEvent({ status: "sent", to: "+123", preview: "ping" });
+  it("adds a delivery-disabled message to target-none events without changing the reason", () => {
+    const listener = vi.fn();
+    heartbeatNotifications.onEvent = listener;
 
-    expect(getLastHeartbeatEvent()).toEqual({
+    emitHeartbeatEvent({ status: "skipped", reason: "target-none" });
+
+    const expected = {
       ts: 1767960000000,
-      status: "sent",
-      to: "+123",
-      preview: "ping",
+      status: "skipped",
+      reason: "target-none",
+      message: "Heartbeat delivery is disabled by configuration (target: none).",
+    };
+    expect(getLastHeartbeatEvent()).toEqual(expected);
+    expect(listener).toHaveBeenCalledWith(expected);
+
+    heartbeatNotifications.onEvent = () => {};
+  });
+
+  it("preserves an explicit message for target-none events", () => {
+    emitHeartbeatEvent({
+      status: "skipped",
+      reason: "target-none",
+      message: "custom diagnostic",
+    });
+
+    expect(getLastHeartbeatEvent()).toMatchObject({
+      reason: "target-none",
+      message: "custom diagnostic",
     });
   });
 
-  it("delivers events to listeners, isolates listener failures, and supports unsubscribe", () => {
-    const seen: string[] = [];
-    const unsubscribeFirst = onHeartbeatEvent((evt) => {
-      seen.push(`first:${evt.status}`);
-    });
-    onHeartbeatEvent(() => {
-      throw new Error("boom");
-    });
-    const unsubscribeThird = onHeartbeatEvent((evt) => {
-      seen.push(`third:${evt.status}`);
-    });
+  it("adds route setup guidance to no-route events", () => {
+    emitHeartbeatEvent({ status: "skipped", reason: "no-route" });
 
+    expect(getLastHeartbeatEvent()).toMatchObject({
+      reason: "no-route",
+      message:
+        "Heartbeat has no delivery route yet. Message your bot once, or set agents.defaults.heartbeat.target.",
+    });
+  });
+
+  it("delivers events to the Gateway callback and isolates its failures", () => {
+    const seen: string[] = [];
+    heartbeatNotifications.onEvent = () => {
+      throw new Error("boom");
+    };
+    expect(() => emitHeartbeatEvent({ status: "failed" })).not.toThrow();
+    expect(getLastHeartbeatEvent()?.status).toBe("failed");
+
+    heartbeatNotifications.onEvent = (evt) => {
+      seen.push(evt.status);
+    };
     emitHeartbeatEvent({ status: "ok-empty" });
-    unsubscribeFirst();
-    unsubscribeThird();
+    heartbeatNotifications.onEvent = () => {};
     emitHeartbeatEvent({ status: "failed" });
 
-    expect(seen).toEqual(["first:ok-empty", "third:ok-empty"]);
+    expect(seen).toEqual(["ok-empty"]);
   });
 
   it("shares heartbeat state across duplicate module instances", async () => {
@@ -75,9 +103,9 @@ describe("heartbeat events", () => {
     first.resetHeartbeatEventsForTest();
 
     const seen: string[] = [];
-    const stop = first.onHeartbeatEvent((evt) => {
+    first.heartbeatNotifications.onEvent = (evt) => {
       seen.push(evt.status);
-    });
+    };
 
     second.emitHeartbeatEvent({ status: "ok-token", preview: "pong" });
 
@@ -88,7 +116,6 @@ describe("heartbeat events", () => {
     });
     expect(seen).toEqual(["ok-token"]);
 
-    stop();
     first.resetHeartbeatEventsForTest();
   });
 });

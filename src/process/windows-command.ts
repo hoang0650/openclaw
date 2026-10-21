@@ -1,4 +1,3 @@
-// Windows command helpers resolve executable and shell invocation details.
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -10,6 +9,7 @@ import {
   resolveExecutableFromPathEnv,
   resolveExecutablePathCandidate,
 } from "../infra/executable-path.js";
+import { resolveEnvironmentValue } from "../infra/process-env.js";
 import { getWindowsCmdExePath } from "../infra/windows-install-roots.js";
 
 const WINDOWS_UNSAFE_CMD_CHARS_RE = /[&|<>%\r\n]/;
@@ -44,11 +44,6 @@ function createWindowsCommandNotFoundError(command: string): NodeJS.ErrnoExcepti
   return error;
 }
 
-function resolveWindowsEnvironmentValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
-  const normalizedName = name.toLowerCase();
-  return Object.entries(env).find(([key]) => key.toLowerCase() === normalizedName)?.[1];
-}
-
 function resolveWindowsCommandFromCwdOrPath(params: {
   command: string;
   cwd?: string;
@@ -75,10 +70,10 @@ function resolveWindowsCommandFromCwdOrPath(params: {
       { includeExtensionless: false },
     );
   }
-  const cwd = params.cwd?.trim() || process.cwd();
+  const cwd = params.cwd && params.cwd.trim() ? params.cwd : process.cwd();
   const pathValue =
-    resolveWindowsEnvironmentValue(params.env, "PATH") ??
-    resolveWindowsEnvironmentValue(process.env, "PATH") ??
+    resolveEnvironmentValue(params.env, "PATH") ??
+    resolveEnvironmentValue(process.env, "PATH") ??
     "";
   const pathEntries = pathValue
     .split(";")
@@ -176,24 +171,24 @@ export function isWindowsBatchCommand(
   return ext === ".cmd" || ext === ".bat";
 }
 
-function escapeForWindowsCmdExe(arg: string): string {
-  if (WINDOWS_UNSAFE_CMD_CHARS_RE.test(arg)) {
-    throw new Error(
-      `Unsafe Windows cmd.exe argument detected: ${JSON.stringify(arg)}. ` +
-        "Pass an explicit shell-wrapper argv at the call site instead.",
-    );
-  }
-  const escaped = arg.replace(/\^/g, "^^");
-  if (!escaped.includes(" ") && !escaped.includes('"')) {
-    return escaped;
-  }
-  return `"${escaped.replace(/"/g, '""')}"`;
-}
-
 export function buildWindowsCmdExeCommandLine(command: string, args: readonly string[]): string {
-  const escapedCommand = escapeForWindowsCmdExe(command);
-  const commandLine = [escapedCommand, ...args.map(escapeForWindowsCmdExe)].join(" ");
-  return escapedCommand.startsWith('"') ? `"${commandLine}"` : commandLine;
+  const escaped = [command, ...args].map((arg) => {
+    if (WINDOWS_UNSAFE_CMD_CHARS_RE.test(arg)) {
+      throw new Error(
+        `Unsafe Windows cmd.exe argument detected: ${JSON.stringify(arg)}. ` +
+          "Pass an explicit shell-wrapper argv at the call site instead.",
+      );
+    }
+    // Quote through cmd and the CRT; consume backslash runs once to avoid quadratic scans.
+    const quoted = arg
+      .replace(/\\+/g, (backslashes, offset) => {
+        const next = arg[offset + backslashes.length];
+        return next === '"' || next === undefined ? backslashes.repeat(2) : backslashes;
+      })
+      .replace(/"/g, '""');
+    return `"${quoted}"`;
+  });
+  return `"${escaped.join(" ")}"`;
 }
 
 export function resolveTrustedWindowsCmdExe(platform: NodeJS.Platform = process.platform): string {

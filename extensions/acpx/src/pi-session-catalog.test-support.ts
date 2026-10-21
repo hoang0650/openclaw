@@ -5,6 +5,69 @@ import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import { vi } from "vitest";
 import { registerPiSessionCatalog } from "./pi-session-catalog-plugin.js";
 
+type RegisteredSessionCatalogProvider = Parameters<OpenClawPluginApi["registerSessionCatalog"]>[0];
+type NodeCommand = Parameters<OpenClawPluginApi["registerNodeHostCommand"]>[0];
+type OptionalCatalogAgent<T extends { agentId?: string }> = Omit<T, "agentId"> & {
+  agentId?: string;
+};
+type CatalogOperation = "list" | "read" | "continueSession" | "archive" | "openTerminal";
+export type TestSessionCatalogProvider = Omit<
+  RegisteredSessionCatalogProvider,
+  CatalogOperation
+> & {
+  [K in keyof Pick<RegisteredSessionCatalogProvider, CatalogOperation>]: (
+    params: OptionalCatalogAgent<Parameters<NonNullable<RegisteredSessionCatalogProvider[K]>>[0]>,
+  ) => ReturnType<NonNullable<RegisteredSessionCatalogProvider[K]>>;
+};
+
+export const piSessionHeader = (overrides: Record<string, unknown> = {}) => ({
+  type: "session",
+  version: 3,
+  id: "pi-session",
+  timestamp: "2026-07-13T10:00:00.000Z",
+  cwd: "/workspace",
+  ...overrides,
+});
+export const piMessage = (
+  message: Record<string, unknown>,
+  overrides: Record<string, unknown> = {},
+) => ({
+  type: "message",
+  timestamp: "2026-07-13T10:00:01.000Z",
+  message,
+  ...overrides,
+});
+export const piJsonl = (entries: unknown[]) =>
+  `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+
+export function restorePiEnvironment(original: NodeJS.ProcessEnv) {
+  for (const [key, value] of Object.entries(original)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
+export function bindTestCatalogOwner(
+  provider: RegisteredSessionCatalogProvider,
+): TestSessionCatalogProvider {
+  const { continueSession, archive, openTerminal } = provider;
+  return {
+    ...provider,
+    list: (params) => provider.list({ agentId: "main", ...params }),
+    read: (params) => provider.read({ agentId: "main", ...params }),
+    ...(continueSession && {
+      continueSession: (params) => continueSession.call(provider, { agentId: "main", ...params }),
+    }),
+    ...(archive && { archive: (params) => archive.call(provider, { agentId: "main", ...params }) }),
+    ...(openTerminal && {
+      openTerminal: (params) => openTerminal.call(provider, { agentId: "main", ...params }),
+    }),
+  } as TestSessionCatalogProvider;
+}
+
 export async function createPiStoreFixture(
   temporaryDirectories: string[],
   assistantText = "hi",
@@ -24,51 +87,38 @@ export async function createPiStoreFixture(
   } else {
     process.env.PI_CODING_AGENT_SESSION_DIR = directory;
   }
+  const messages = [
+    { role: "user", content: "hello" },
+    {
+      role: "assistant",
+      provider: "anthropic",
+      model: "claude",
+      content: [
+        { type: "thinking", thinking: "thinking" },
+        { type: "text", text: assistantText },
+        { type: "toolCall", id: "call-1", name: "bash", arguments: toolArguments },
+      ],
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "bash",
+      content: [{ type: "text", text: "/workspace" }],
+    },
+  ];
+  const ids = ["user-1", "assistant-1", "tool-1"];
   const entries = [
-    {
-      type: "session",
-      version: 3,
-      id: "pi-session",
-      timestamp: "2026-07-13T10:00:00.000Z",
-      cwd: "/workspace",
-    },
-    {
-      type: "message",
-      id: "user-1",
-      parentId: null,
-      timestamp: "2026-07-13T10:00:01.000Z",
-      message: { role: "user", content: "hello", timestamp: 1_783_938_001_000 },
-    },
-    {
-      type: "message",
-      id: "assistant-1",
-      parentId: "user-1",
-      timestamp: "2026-07-13T10:00:02.000Z",
-      message: {
-        role: "assistant",
-        provider: "anthropic",
-        model: "claude",
-        timestamp: 1_783_938_002_000,
-        content: [
-          { type: "thinking", thinking: "thinking" },
-          { type: "text", text: assistantText },
-          { type: "toolCall", id: "call-1", name: "bash", arguments: toolArguments },
-        ],
-      },
-    },
-    {
-      type: "message",
-      id: "tool-1",
-      parentId: "assistant-1",
-      timestamp: "2026-07-13T10:00:03.000Z",
-      message: {
-        role: "toolResult",
-        toolCallId: "call-1",
-        toolName: "bash",
-        timestamp: 1_783_938_003_000,
-        content: [{ type: "text", text: "/workspace" }],
-      },
-    },
+    piSessionHeader(),
+    ...messages.map((message, index) =>
+      piMessage(
+        { ...message, timestamp: 1_783_938_001_000 + index * 1_000 },
+        {
+          id: ids[index],
+          parentId: index === 0 ? null : ids[index - 1],
+          timestamp: `2026-07-13T10:00:0${index + 1}.000Z`,
+        },
+      ),
+    ),
     {
       type: "session_info",
       id: "info-1",
@@ -77,10 +127,7 @@ export async function createPiStoreFixture(
       name: sessionName,
     },
   ];
-  await fs.writeFile(
-    path.join(directory, "session.jsonl"),
-    `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
-  );
+  await fs.writeFile(path.join(directory, "session.jsonl"), piJsonl(entries));
   return directory;
 }
 
@@ -92,30 +139,30 @@ export async function installFakePiFixture(
     path.join(resolvePreferredOpenClawTmpDir(), "openclaw-pi-cli-"),
   );
   temporaryDirectories.push(directory);
-  const executable = path.join(directory, "pi");
-  await fs.writeFile(executable, "#!/bin/sh\nexit 0\n");
-  await fs.chmod(executable, 0o755);
+  const bareExecutable = path.join(directory, "pi");
+  await fs.writeFile(bareExecutable, "#!/bin/sh\nexit 0\n");
+  if (process.platform === "win32") {
+    await fs.writeFile(path.join(directory, "pi.cmd"), "@echo off\r\nexit /b 0\r\n");
+  } else {
+    await fs.chmod(bareExecutable, 0o755);
+  }
   process.env.PATH = `${directory}${path.delimiter}${originalPath ?? ""}`;
   return directory;
 }
 
-export function registerPiNodeHostCommands(): Parameters<
-  OpenClawPluginApi["registerNodeHostCommand"]
->[0][] {
-  const commands: Parameters<OpenClawPluginApi["registerNodeHostCommand"]>[0][] = [];
+export function registerPiNodeHostCommands(): NodeCommand[] {
+  const commands: NodeCommand[] = [];
   registerPiSessionCatalog({
     pluginConfig: {},
     registerSessionCatalog: vi.fn(),
-    registerNodeHostCommand: (
-      command: Parameters<OpenClawPluginApi["registerNodeHostCommand"]>[0],
-    ) => commands.push(command),
+    registerNodeHostCommand: (command: NodeCommand) => commands.push(command),
     registerNodeInvokePolicy: vi.fn(),
   } as unknown as OpenClawPluginApi);
   return commands;
 }
 
 export function capturePiContinuationCatalog() {
-  let provider: Parameters<OpenClawPluginApi["registerSessionCatalog"]>[0] | undefined;
+  let provider: TestSessionCatalogProvider | undefined;
   const entries: Array<{ sessionKey: string; entry: Record<string, unknown> }> = [];
   const createSessionEntry = vi.fn(
     async (
@@ -128,6 +175,7 @@ export function capturePiContinuationCatalog() {
         pluginOwnerId: "acpx",
         initializationPending: true as const,
         ...(params.label ? { label: params.label } : {}),
+        ...(params.displayName ? { displayName: params.displayName } : {}),
         ...(params.spawnedCwd ? { spawnedCwd: params.spawnedCwd } : {}),
         pluginExtensions: params.initialEntry.pluginExtensions,
       };
@@ -166,8 +214,8 @@ export function capturePiContinuationCatalog() {
         },
       },
     },
-    registerSessionCatalog: (value: NonNullable<typeof provider>) => {
-      provider = value;
+    registerSessionCatalog: (value: RegisteredSessionCatalogProvider) => {
+      provider = bindTestCatalogOwner(value);
     },
     registerNodeHostCommand: vi.fn(),
     registerNodeInvokePolicy: vi.fn(),

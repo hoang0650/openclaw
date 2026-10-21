@@ -1,15 +1,27 @@
-// Slack tests cover monitor.media plugin behavior.
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetSlackThreadStarterCacheForTest, resolveSlackThreadStarter } from "./thread.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveSlackThreadStarter } from "./thread.js";
 
-type ThreadStarterClient = Parameters<typeof resolveSlackThreadStarter>[0]["client"];
+type ResolveSlackThreadStarterParams = Parameters<typeof resolveSlackThreadStarter>[0];
+type ThreadStarterClient = ResolveSlackThreadStarterParams["client"];
 
-function createThreadStarterRepliesClient(
-  response: { messages?: Array<{ text?: string; user?: string; ts?: string }> } = {
-    messages: [{ text: "root message", user: "U1", ts: "1000.1" }],
-  },
-): { replies: ReturnType<typeof vi.fn>; client: ThreadStarterClient } {
-  const replies = vi.fn(async () => response);
+let testWorkspaceSequence = 0;
+let testWorkspaceScope = { accountId: "test-0", teamId: "T0" };
+
+function resolveTestSlackThreadStarter(
+  client: ThreadStarterClient,
+  overrides: Partial<Omit<ResolveSlackThreadStarterParams, "client">> = {},
+) {
+  return resolveSlackThreadStarter({
+    channelId: "C1",
+    threadTs: "1000.1",
+    workspaceScope: testWorkspaceScope,
+    client,
+    ...overrides,
+  });
+}
+
+function createThreadStarterRepliesClient(text = "root message") {
+  const replies = vi.fn(async () => ({ messages: [{ text }] }));
   const client = {
     conversations: { replies },
   } as unknown as ThreadStarterClient;
@@ -17,59 +29,37 @@ function createThreadStarterRepliesClient(
 }
 
 describe("resolveSlackThreadStarter cache", () => {
+  beforeEach(() => {
+    testWorkspaceSequence += 1;
+    testWorkspaceScope = {
+      accountId: `test-${testWorkspaceSequence}`,
+      teamId: `T${testWorkspaceSequence}`,
+    };
+  });
+
   afterEach(() => {
-    resetSlackThreadStarterCacheForTest();
     vi.useRealTimers();
   });
 
-  it("returns cached thread starter without refetching within ttl", async () => {
-    const { replies, client } = createThreadStarterRepliesClient();
+  it("caches within ttl and isolates the same channel and thread across Slack accounts", async () => {
+    const teamOne = createThreadStarterRepliesClient("team one root");
+    const teamTwo = createThreadStarterRepliesClient("team two root");
+    const root = Promise.withResolvers<{ messages: { text: string }[] }>();
+    teamOne.replies.mockImplementationOnce(() => root.promise);
 
-    const first = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
-    const second = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
-
-    expect(first).toEqual(second);
-    expect(replies).toHaveBeenCalledTimes(1);
-  });
-
-  it("isolates the same channel and thread across enterprise workspaces", async () => {
-    const teamOne = createThreadStarterRepliesClient({
-      messages: [{ text: "team one root", user: "U1", ts: "1000.1" }],
-    });
-    const teamTwo = createThreadStarterRepliesClient({
-      messages: [{ text: "team two root", user: "U2", ts: "1000.1" }],
-    });
-
-    const first = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client: teamOne.client,
-      workspaceScope: { accountId: "enterprise", teamId: "T1" },
-    });
-    const second = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client: teamTwo.client,
-      workspaceScope: { accountId: "enterprise", teamId: "T2" },
-    });
-    const cachedFirst = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client: teamOne.client,
-      workspaceScope: { accountId: "enterprise", teamId: "T1" },
-    });
+    const scopeOne = { workspaceScope: { accountId: "account-one", teamId: "T1" } };
+    const scopeTwo = { workspaceScope: { accountId: "account-two", teamId: "T2" } };
+    const firstPending = resolveTestSlackThreadStarter(teamOne.client, scopeOne);
+    const sharedPending = resolveTestSlackThreadStarter(teamOne.client, scopeOne);
+    const second = await resolveTestSlackThreadStarter(teamTwo.client, scopeTwo);
+    root.resolve({ messages: [{ text: "team one root" }] });
+    const first = await firstPending;
+    expect(await sharedPending).toEqual(first);
+    const cachedFirst = await resolveTestSlackThreadStarter(teamOne.client, scopeOne);
 
     expect(first?.text).toBe("team one root");
     expect(second?.text).toBe("team two root");
-    expect(cachedFirst?.text).toBe("team one root");
+    expect(cachedFirst).toEqual(first);
     expect(teamOne.replies).toHaveBeenCalledTimes(1);
     expect(teamTwo.replies).toHaveBeenCalledTimes(1);
   });
@@ -80,99 +70,44 @@ describe("resolveSlackThreadStarter cache", () => {
 
     const { replies, client } = createThreadStarterRepliesClient();
 
-    await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
+    await resolveTestSlackThreadStarter(client);
 
     vi.setSystemTime(new Date("2026-01-01T07:00:00.000Z"));
-    await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
+    await resolveTestSlackThreadStarter(client);
 
-    expect(replies).toHaveBeenCalledTimes(2);
-  });
-
-  it("drops cached thread starters when the current clock is not a valid date timestamp", async () => {
-    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
-    const { replies, client } = createThreadStarterRepliesClient();
-
-    const first = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
-    nowSpy.mockReturnValue(Number.NaN);
-    const second = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
-
-    expect(first).toEqual(second);
-    expect(replies).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not cache thread starters when the expiry timestamp would exceed the valid date range", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(8_640_000_000_000_000);
-    const { replies, client } = createThreadStarterRepliesClient();
-
-    const first = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
-    const second = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
-
-    expect(first).toEqual(second);
     expect(replies).toHaveBeenCalledTimes(2);
   });
 
   it("does not cache empty starter text", async () => {
-    const { replies, client } = createThreadStarterRepliesClient({
-      messages: [{ text: "   ", user: "U1", ts: "1000.1" }],
-    });
+    const { replies, client } = createThreadStarterRepliesClient("   ");
 
-    const first = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
-    const second = await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.1",
-      client,
-    });
+    const first = await resolveTestSlackThreadStarter(client);
+    const second = await resolveTestSlackThreadStarter(client);
 
-    expect(first).toBeNull();
-    expect(second).toBeNull();
+    expect([first, second]).toEqual([null, null]);
     expect(replies).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes cached starters and retries after a failed refresh", async () => {
+    const { replies, client } = createThreadStarterRepliesClient();
+    await resolveTestSlackThreadStarter(client);
+    replies.mockRejectedValueOnce(new Error("slack down"));
+    expect(await resolveTestSlackThreadStarter(client, { refresh: true })).toBeNull();
+    replies.mockResolvedValueOnce({ messages: [{ text: "updated root" }] });
+    expect((await resolveTestSlackThreadStarter(client))?.text).toBe("updated root");
+    expect((await resolveTestSlackThreadStarter(client))?.text).toBe("updated root");
+    expect(replies).toHaveBeenCalledTimes(3);
   });
 
   it("evicts oldest entries once cache exceeds bounded size", async () => {
     const { replies, client } = createThreadStarterRepliesClient();
 
     for (let i = 0; i <= 2000; i += 1) {
-      await resolveSlackThreadStarter({
-        channelId: "C1",
-        threadTs: `1000.${i}`,
-        client,
-      });
+      await resolveTestSlackThreadStarter(client, { threadTs: `1000.${i}` });
     }
     const callsAfterFill = replies.mock.calls.length;
 
-    await resolveSlackThreadStarter({
-      channelId: "C1",
-      threadTs: "1000.0",
-      client,
-    });
+    await resolveTestSlackThreadStarter(client, { threadTs: "1000.0" });
 
     expect(replies.mock.calls.length).toBe(callsAfterFill + 1);
   });

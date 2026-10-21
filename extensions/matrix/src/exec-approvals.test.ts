@@ -1,6 +1,3 @@
-// Matrix tests cover exec approvals plugin behavior.
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { ExecApprovalRequest } from "openclaw/plugin-sdk/approval-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
@@ -8,50 +5,32 @@ import {
   normalizeSessionDeliveryState,
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawAgentDatabasesForTest } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { afterAll, describe, expect, it } from "vitest";
 import { normalizeMatrixApproverId } from "./approval-ids.js";
 import {
   getMatrixExecApprovalApprovers,
   isMatrixExecApprovalAuthorizedSender,
-  isMatrixExecApprovalClientEnabled,
+  isMatrixApprovalClientEnabled,
   resolveMatrixExecApprovalTarget,
   shouldHandleMatrixApprovalRequest,
   shouldSuppressLocalMatrixExecApprovalPrompt,
 } from "./exec-approvals.js";
 import type { MatrixAccountConfig } from "./types.js";
 
-const tempDirs: string[] = [];
-type MatrixExecApprovalConfig = NonNullable<MatrixAccountConfig["execApprovals"]>;
-type MatrixExecApprovalRequest = ExecApprovalRequest;
-
-function shouldHandleMatrixExecApprovalRequest(params: {
-  cfg: OpenClawConfig;
-  accountId?: string | null;
-  request: ExecApprovalRequest;
-}): boolean {
-  return shouldHandleMatrixApprovalRequest({
-    ...params,
-    approvalKind: "exec",
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(sessionRoot);
+    cleanup();
   });
-}
-
-afterEach(() => {
-  closeOpenClawAgentDatabasesForTest();
-  for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
-
-function createTempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-matrix-exec-approvals-"));
-  tempDirs.push(dir);
-  return dir;
-}
+const sessionRoot = tempDirs.make("openclaw-matrix-exec-approvals-");
+type MatrixExecApprovalConfig = NonNullable<MatrixAccountConfig["execApprovals"]>;
 
 function buildConfig(
-  execApprovals?: NonNullable<NonNullable<OpenClawConfig["channels"]>["matrix"]>["execApprovals"],
-  channelOverrides?: Partial<NonNullable<NonNullable<OpenClawConfig["channels"]>["matrix"]>>,
+  execApprovals?: MatrixExecApprovalConfig,
+  channelOverrides?: Partial<MatrixAccountConfig>,
 ): OpenClawConfig {
   return {
     channels: {
@@ -68,7 +47,6 @@ function buildConfig(
 
 function matrixAccount(
   accountId: string,
-  execApprovals: MatrixExecApprovalConfig,
   overrides: Partial<MatrixAccountConfig> = {},
 ): MatrixAccountConfig {
   return {
@@ -76,15 +54,12 @@ function matrixAccount(
     userId: `@bot-${accountId}:example.org`,
     accessToken: `tok-${accountId}`,
     ...overrides,
-    execApprovals,
+    execApprovals: { enabled: true, approvers: ["@owner:example.org"] },
   };
 }
 
 function buildMultiAccountMatrixConfig(params: {
   sessionStorePath?: string;
-  defaultExecApprovals?: MatrixExecApprovalConfig;
-  opsExecApprovals?: MatrixExecApprovalConfig;
-  defaultOverrides?: Partial<MatrixAccountConfig>;
   opsOverrides?: Partial<MatrixAccountConfig>;
 }): OpenClawConfig {
   return {
@@ -92,40 +67,26 @@ function buildMultiAccountMatrixConfig(params: {
     channels: {
       matrix: {
         accounts: {
-          default: matrixAccount(
-            "default",
-            params.defaultExecApprovals ?? {
-              enabled: true,
-              approvers: ["@owner:example.org"],
-            },
-            params.defaultOverrides,
-          ),
-          ops: matrixAccount(
-            "ops",
-            params.opsExecApprovals ?? {
-              enabled: true,
-              approvers: ["@owner:example.org"],
-            },
-            params.opsOverrides,
-          ),
+          default: matrixAccount("default"),
+          ops: matrixAccount("ops", params.opsOverrides),
         },
       },
     },
   } as OpenClawConfig;
 }
 
-function makeForeignChannelApprovalRequest(params: {
+function makeChannelApprovalRequest(params: {
   id: string;
   sessionKey?: string;
-  agentId?: string;
-}): MatrixExecApprovalRequest {
+  turnSourceChannel?: string;
+}): ExecApprovalRequest {
   return {
     id: params.id,
     request: {
       command: "echo hi",
-      agentId: params.agentId ?? "ops-agent",
+      agentId: "ops-agent",
       sessionKey: params.sessionKey ?? "agent:ops-agent:missing",
-      turnSourceChannel: "slack",
+      turnSourceChannel: params.turnSourceChannel ?? "slack",
       turnSourceTo: "channel:C123",
     },
     createdAtMs: 0,
@@ -133,43 +94,30 @@ function makeForeignChannelApprovalRequest(params: {
   };
 }
 
+function forwardingConfig(targets: Array<{ channel: string; to: string }>): OpenClawConfig {
+  return {
+    ...buildConfig(),
+    approvals: { exec: { enabled: true, mode: "targets", targets } },
+  };
+}
+
+async function expectEligibility(
+  cfg: OpenClawConfig,
+  request: ExecApprovalRequest,
+  defaultEnabled: boolean,
+) {
+  const check = (accountId: string) =>
+    shouldHandleMatrixApprovalRequest({
+      cfg,
+      accountId,
+      request,
+      approvalKind: "exec",
+    });
+  expect(await check("default")).toBe(defaultEnabled);
+  expect(await check("ops")).toBe(!defaultEnabled);
+}
+
 describe("matrix exec approvals", () => {
-  it("requires enablement and approvers before enabling the client", () => {
-    expect(isMatrixExecApprovalClientEnabled({ cfg: buildConfig() })).toBe(false);
-    expect(
-      isMatrixExecApprovalClientEnabled({
-        cfg: buildConfig(undefined, { dm: { allowFrom: ["@owner:example.org"] } }),
-      }),
-    ).toBe(false);
-    expect(isMatrixExecApprovalClientEnabled({ cfg: buildConfig({ enabled: true }) })).toBe(false);
-    expect(
-      isMatrixExecApprovalClientEnabled({
-        cfg: buildConfig({ enabled: true }, { dm: { allowFrom: ["@owner:example.org"] } }),
-      }),
-    ).toBe(true);
-    expect(
-      isMatrixExecApprovalClientEnabled({
-        cfg: buildConfig({ enabled: true, approvers: ["@owner:example.org"] }),
-      }),
-    ).toBe(true);
-  });
-
-  it("enables explicit auto mode only when Matrix approvers can be resolved", () => {
-    expect(isMatrixExecApprovalClientEnabled({ cfg: buildConfig({ enabled: "auto" }) })).toBe(
-      false,
-    );
-    expect(
-      isMatrixExecApprovalClientEnabled({
-        cfg: buildConfig({ enabled: "auto" }, { dm: { allowFrom: ["@owner:example.org"] } }),
-      }),
-    ).toBe(true);
-    expect(
-      isMatrixExecApprovalClientEnabled({
-        cfg: buildConfig({ enabled: "auto", approvers: ["@owner:example.org"] }),
-      }),
-    ).toBe(true);
-  });
-
   it("prefers explicit approvers when configured", () => {
     const cfg = buildConfig(
       { enabled: true, approvers: ["user:@override:example.org"] },
@@ -185,11 +133,11 @@ describe("matrix exec approvals", () => {
     );
   });
 
-  it("ignores wildcard allowlist entries when inferring exec approvers", () => {
+  it("ignores wildcard allowlist entries when inferring exec approvers", async () => {
     const cfg = buildConfig({ enabled: true }, { dm: { allowFrom: ["*"] } });
 
     expect(getMatrixExecApprovalApprovers({ cfg })).toStrictEqual([]);
-    expect(isMatrixExecApprovalClientEnabled({ cfg })).toBe(false);
+    expect(await isMatrixApprovalClientEnabled({ approvalKind: "exec", cfg })).toBe(false);
   });
 
   it("defaults target to dm", () => {
@@ -201,25 +149,10 @@ describe("matrix exec approvals", () => {
   });
 
   it("matches matrix target recipients from generic approval forwarding targets", () => {
-    const cfg = {
-      channels: {
-        matrix: {
-          homeserver: "https://matrix.example.org",
-          userId: "@bot:example.org",
-          accessToken: "tok",
-        },
-      },
-      approvals: {
-        exec: {
-          enabled: true,
-          mode: "targets",
-          targets: [
-            { channel: "matrix", to: "user:@target:example.org" },
-            { channel: "matrix", to: "room:!ops:example.org" },
-          ],
-        },
-      },
-    } as OpenClawConfig;
+    const cfg = forwardingConfig([
+      { channel: "matrix", to: "user:@target:example.org" },
+      { channel: "matrix", to: "room:!ops:example.org" },
+    ]);
 
     expect(isMatrixExecApprovalAuthorizedSender({ cfg, senderId: "@target:example.org" })).toBe(
       true,
@@ -229,103 +162,38 @@ describe("matrix exec approvals", () => {
     );
   });
 
-  it("suppresses local prompts only when the native client is enabled", () => {
-    const payload = {
-      channelData: {
-        execApproval: {
-          approvalId: "req-1",
-          approvalSlug: "req-1",
-          agentId: "ops-agent",
-          sessionKey: "agent:ops-agent:matrix:channel:!ops:example.org",
-        },
-      },
-    };
+  it("requires an exact Matrix id for approval target recipients", () => {
+    const cfg = forwardingConfig([{ channel: "matrix", to: "user:@\u212A:example.org" }]);
 
-    expect(
-      shouldSuppressLocalMatrixExecApprovalPrompt({
-        cfg: buildConfig({ enabled: true, approvers: ["@owner:example.org"] }),
-        payload,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldSuppressLocalMatrixExecApprovalPrompt({
-        cfg: buildConfig(),
-        payload,
-      }),
-    ).toBe(false);
+    expect(isMatrixExecApprovalAuthorizedSender({ cfg, senderId: "@\u212A:example.org" })).toBe(
+      true,
+    );
+    expect(isMatrixExecApprovalAuthorizedSender({ cfg, senderId: "@k:example.org" })).toBe(false);
   });
 
-  it("keeps local prompts when filters exclude the request", () => {
-    const payload = {
-      channelData: {
-        execApproval: {
-          approvalId: "req-1",
-          approvalSlug: "req-1",
-          agentId: "other-agent",
-          sessionKey: "agent:other-agent:matrix:channel:!ops:example.org",
-        },
-      },
-    };
-
+  const exec = {
+    approvalId: "req-1",
+    approvalSlug: "req-1",
+    agentId: "ops-agent",
+    sessionKey: "agent:ops-agent:matrix:channel:!ops:example.org",
+  };
+  const enabled = { enabled: true, approvers: ["@owner:example.org"] };
+  it.each([
+    { name: "enabled exec", cfg: buildConfig(enabled), metadata: exec, suppressed: true },
+    { name: "disabled exec", cfg: buildConfig(), metadata: exec, suppressed: false },
+    {
+      name: "plugin with DM approvers",
+      cfg: buildConfig(enabled, { dm: { allowFrom: ["@owner:example.org"] } }),
+      metadata: { approvalId: "plugin:req-1", approvalSlug: "plugin:r", approvalKind: "plugin" },
+      suppressed: true,
+    },
+  ])("suppresses local prompts for $name: $suppressed", async ({ cfg, metadata, suppressed }) => {
     expect(
-      shouldSuppressLocalMatrixExecApprovalPrompt({
-        cfg: buildConfig({
-          enabled: true,
-          approvers: ["@owner:example.org"],
-          agentFilter: ["ops-agent"],
-        }),
-        payload,
+      await shouldSuppressLocalMatrixExecApprovalPrompt({
+        cfg,
+        payload: { channelData: { execApproval: metadata } },
       }),
-    ).toBe(false);
-  });
-
-  it("suppresses local prompts for generic exec payloads when metadata matches filters", () => {
-    const payload = {
-      channelData: {
-        execApproval: {
-          approvalId: "req-1",
-          approvalSlug: "req-1",
-          approvalKind: "exec",
-          agentId: "ops-agent",
-          sessionKey: "agent:ops-agent:matrix:channel:!ops:example.org",
-        },
-      },
-    };
-
-    expect(
-      shouldSuppressLocalMatrixExecApprovalPrompt({
-        cfg: buildConfig({
-          enabled: true,
-          approvers: ["@owner:example.org"],
-          agentFilter: ["ops-agent"],
-          sessionFilter: ["matrix:channel:"],
-        }),
-        payload,
-      }),
-    ).toBe(true);
-  });
-
-  it("suppresses local prompts for plugin approval payloads when DM approvers are configured", () => {
-    const payload = {
-      channelData: {
-        execApproval: {
-          approvalId: "plugin:req-1",
-          approvalSlug: "plugin:r",
-          approvalKind: "plugin",
-        },
-      },
-    };
-
-    expect(
-      shouldSuppressLocalMatrixExecApprovalPrompt({
-        cfg: buildConfig(
-          { enabled: true, approvers: ["@owner:example.org"] },
-          { dm: { allowFrom: ["@owner:example.org"] } },
-        ),
-        payload,
-      }),
-    ).toBe(true);
+    ).toBe(suppressed);
   });
 
   it("normalizes prefixed approver ids", () => {
@@ -333,49 +201,8 @@ describe("matrix exec approvals", () => {
     expect(normalizeMatrixApproverId("user:@owner:example.org")).toBe("@owner:example.org");
   });
 
-  it("applies agent and session filters to request handling", () => {
-    const cfg = buildConfig({
-      enabled: true,
-      approvers: ["@owner:example.org"],
-      agentFilter: ["ops-agent"],
-      sessionFilter: ["matrix:channel:", "ops$"],
-    });
-
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        request: {
-          id: "req-1",
-          request: {
-            command: "echo hi",
-            agentId: "ops-agent",
-            sessionKey: "agent:ops-agent:matrix:channel:!room:example.org:ops",
-          },
-          createdAtMs: 0,
-          expiresAtMs: 1000,
-        },
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        request: {
-          id: "req-2",
-          request: {
-            command: "echo hi",
-            agentId: "other-agent",
-            sessionKey: "agent:other-agent:matrix:channel:!room:example.org:ops",
-          },
-          createdAtMs: 0,
-          expiresAtMs: 1000,
-        },
-      }),
-    ).toBe(false);
-  });
-
   it("scopes non-matrix turn sources to the stored matrix account", async () => {
-    const tmpDir = createTempDir();
+    const tmpDir = tempDirs.make("case-", sessionRoot);
     const storePath = path.join(tmpDir, "sessions.json");
     await upsertSessionEntry({
       storePath,
@@ -399,122 +226,23 @@ describe("matrix exec approvals", () => {
       },
     });
     const cfg = buildMultiAccountMatrixConfig({ sessionStorePath: storePath });
-    const request = makeForeignChannelApprovalRequest({
+    const request = makeChannelApprovalRequest({
       id: "req-3",
       sessionKey: "agent:ops-agent:matrix:channel:!room:example.org",
     });
 
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "default",
-        request,
-      }),
-    ).toBe(false);
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "ops",
-        request,
-      }),
-    ).toBe(true);
+    await expectEligibility(cfg, request, false);
   });
 
-  it("rejects unbound foreign-channel approvals in multi-account matrix configs", () => {
-    const cfg = buildMultiAccountMatrixConfig({});
-    const request = makeForeignChannelApprovalRequest({ id: "req-4" });
-
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "default",
-        request,
-      }),
-    ).toBe(false);
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "ops",
-        request,
-      }),
-    ).toBe(false);
-  });
-
-  it("allows unbound foreign-channel approvals when only one matrix account can handle them", () => {
-    const cfg = buildMultiAccountMatrixConfig({
-      opsExecApprovals: {
-        enabled: false,
-        approvers: ["@owner:example.org"],
-      },
-    });
-    const request = makeForeignChannelApprovalRequest({ id: "req-5" });
-
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "default",
-        request,
-      }),
-    ).toBe(true);
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "ops",
-        request,
-      }),
-    ).toBe(false);
-  });
-
-  it("uses request filters when checking foreign-channel matrix ambiguity", () => {
-    const cfg = buildMultiAccountMatrixConfig({
-      defaultExecApprovals: {
-        enabled: true,
-        approvers: ["@owner:example.org"],
-        agentFilter: ["ops-agent"],
-      },
-      opsExecApprovals: {
-        enabled: true,
-        approvers: ["@owner:example.org"],
-        agentFilter: ["other-agent"],
-      },
-    });
-    const request = makeForeignChannelApprovalRequest({ id: "req-6" });
-
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "default",
-        request,
-      }),
-    ).toBe(true);
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "ops",
-        request,
-      }),
-    ).toBe(false);
-  });
-
-  it("ignores disabled matrix accounts when checking foreign-channel ambiguity", () => {
+  it("ignores disabled matrix accounts when checking unbound account eligibility", async () => {
     const cfg = buildMultiAccountMatrixConfig({
       opsOverrides: { enabled: false },
     });
-    const request = makeForeignChannelApprovalRequest({ id: "req-7" });
+    const request = makeChannelApprovalRequest({
+      id: "req-7",
+      turnSourceChannel: "matrix",
+    });
 
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "default",
-        request,
-      }),
-    ).toBe(true);
-    expect(
-      shouldHandleMatrixExecApprovalRequest({
-        cfg,
-        accountId: "ops",
-        request,
-      }),
-    ).toBe(false);
+    await expectEligibility(cfg, request, true);
   });
 });

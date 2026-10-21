@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createTicket: vi.fn(),
@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   peekRuntime: vi.fn(),
 }));
 
-vi.mock("../agents/agent-bundle-mcp-runtime.js", () => ({
+vi.mock("../agents/agent-bundle-mcp-manager-api.js", () => ({
   peekSessionMcpRuntime: mocks.peekRuntime,
 }));
 vi.mock("../agents/mcp-ui-resource.js", () => ({
@@ -17,7 +17,10 @@ vi.mock("./mcp-app-standalone.js", () => ({
 }));
 
 import { materializeMcpAppChannelPresentation } from "./mcp-app-channel-action.js";
-import { getMcpAppChannelOrigin, prepareMcpAppChannelOrigin } from "./mcp-app-channel-origin.js";
+import {
+  getTailscalePublishedOrigin,
+  prepareTailscalePublishedOrigin,
+} from "./tailscale-published-origin.js";
 
 const nowMs = 1_800_000_000_000;
 const runtime = { sessionId: "runtime-session", mcpAppsEnabled: true };
@@ -29,14 +32,20 @@ const view = {
   toolInput: { privateInput: "do-not-emit-input" },
   toolResult: { privateResult: "do-not-emit-result" },
 };
+const channelView = { viewId: view.viewId, title: "do-not-emit-title" };
+const sessionKey = "agent:main:do-not-emit-session";
 
-function resetMcpAppChannelOrigin() {
-  prepareMcpAppChannelOrigin({ origin: "https://reset.test", reachability: "tailnet" })();
+function publishOrigin(origin = "https://node.tailnet.ts.net", mode: "serve" | "funnel" = "serve") {
+  return prepareTailscalePublishedOrigin({ origin, mode });
 }
+
+const materialize = () =>
+  materializeMcpAppChannelPresentation({ sessionKey, view: channelView, nowMs });
+const resetTailscalePublishedOrigin = () => publishOrigin("https://reset.test")();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  resetMcpAppChannelOrigin();
+  resetTailscalePublishedOrigin();
   mocks.peekRuntime.mockReturnValue(runtime);
   mocks.getView.mockReturnValue(view);
   mocks.createTicket.mockReturnValue({
@@ -46,98 +55,60 @@ beforeEach(() => {
   });
 });
 
-describe("MCP App channel origin", () => {
-  it("stores one lifecycle-owned Serve or Funnel snapshot", () => {
-    const clearServe = prepareMcpAppChannelOrigin({
-      origin: "https://node.tailnet.ts.net",
-      reachability: "tailnet",
-    });
-    const clearFunnel = prepareMcpAppChannelOrigin({
-      origin: "https://public.example.ts.net/",
-      reachability: "internet",
-    });
+afterEach(resetTailscalePublishedOrigin);
 
-    expect(getMcpAppChannelOrigin()).toEqual({
+describe("Tailscale published origin", () => {
+  it("stores one lifecycle-owned Serve or Funnel snapshot", () => {
+    const clearServe = publishOrigin();
+    const clearFunnel = publishOrigin("https://public.example.ts.net/", "funnel");
+
+    expect(getTailscalePublishedOrigin()).toMatchObject({
       origin: "https://public.example.ts.net",
-      reachability: "internet",
+      mode: "funnel",
     });
     clearServe();
-    expect(getMcpAppChannelOrigin()).toBeDefined();
+    expect(getTailscalePublishedOrigin()).toBeDefined();
     clearFunnel();
-    expect(getMcpAppChannelOrigin()).toBeUndefined();
+    expect(getTailscalePublishedOrigin()).toBeUndefined();
   });
 
   it.each(["http://node.test", "https://%75@node.test", "https://node.test/path"])(
     "rejects unsafe origin %s",
     (origin) => {
-      expect(() => prepareMcpAppChannelOrigin({ origin, reachability: "tailnet" })).toThrow(
-        "absolute HTTPS origin",
-      );
+      expect(() => publishOrigin(origin)).toThrow("absolute HTTPS origin");
     },
   );
 });
 
 describe("materializeMcpAppChannelPresentation", () => {
   it("mints late and emits only one typed action with an opaque ticket", () => {
-    prepareMcpAppChannelOrigin({
-      origin: "https://node.tailnet.ts.net",
-      reachability: "tailnet",
-    });
+    publishOrigin();
+    const presentation = materialize();
 
-    const presentation = materializeMcpAppChannelPresentation({
-      sessionKey: "agent:main:do-not-emit-session",
-      view: { viewId: "view-latest", title: "do-not-emit-title" } as never,
+    expect(mocks.createTicket).toHaveBeenCalledExactlyOnceWith({
+      sessionKey,
+      view,
+      toolOperationsAuthorized: true,
       nowMs,
     });
-
-    expect(mocks.createTicket).toHaveBeenCalledOnce();
-    expect(presentation).toEqual({
-      blocks: [
-        {
-          type: "buttons",
-          buttons: [
-            {
-              label: "Open app",
-              action: {
-                type: "web-app",
-                url: "https://node.tailnet.ts.net/__openclaw__/mcp-app#opaque-ticket",
-              },
-            },
-          ],
-        },
-      ],
-    });
-    const serialized = JSON.stringify(presentation);
-    for (const privateValue of [
-      view.html,
-      "do-not-emit-input",
-      "do-not-emit-result",
-      "do-not-emit-session",
-      "do-not-emit-title",
-      view.viewId,
-    ]) {
-      expect(serialized).not.toContain(privateValue);
-    }
+    const button = {
+      label: "Open app",
+      action: {
+        type: "web-app",
+        url: "https://node.tailnet.ts.net/__openclaw__/mcp-app#opaque-ticket",
+      },
+    };
+    expect(presentation).toEqual({ blocks: [{ type: "buttons", buttons: [button] }] });
   });
 
   it.each([
-    ["missing origin", resetMcpAppChannelOrigin],
+    ["missing origin", resetTailscalePublishedOrigin],
     ["missing view", () => mocks.getView.mockReturnValue(undefined)],
     ["expired view", () => mocks.getView.mockReturnValue({ ...view, expiresAtMs: nowMs })],
     ["ticket capacity", () => mocks.createTicket.mockReturnValue(undefined)],
   ])("omits the action for %s", (_name, arrange) => {
-    prepareMcpAppChannelOrigin({
-      origin: "https://node.tailnet.ts.net",
-      reachability: "tailnet",
-    });
+    publishOrigin();
     arrange();
-
-    expect(
-      materializeMcpAppChannelPresentation({
-        sessionKey: "agent:main:main",
-        view: { viewId: "view-latest" },
-        nowMs,
-      }),
-    ).toBeUndefined();
+    expect(materialize()).toBeUndefined();
   });
 });

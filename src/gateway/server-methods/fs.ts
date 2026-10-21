@@ -1,30 +1,23 @@
-// Host directory browsing for the new-session folder picker. operator.admin
-// only (see core-descriptors): listing arbitrary host paths carries the same
-// trust as starting a session with an explicit cwd.
+// Host directory browsing for the new-session folder picker. Write-scoped
+// callers stay inside configured agent workspaces; admin retains host access.
+import { safeParseJson } from "@openclaw/normalization-core";
 import {
   ErrorCodes,
   errorShape,
+  missingScopeErrorShape,
   validateFsListDirParams,
   validateFsListDirResult,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { listHostDirectories } from "../../infra/host-directory-listing.js";
 import { NODE_FS_LIST_DIR_COMMAND } from "../../infra/node-commands.js";
+import { errorShapeFromError } from "../error-shape.js";
 import { isNodeCommandAllowed, resolveNodeCommandAllowlist } from "../node-command-policy.js";
+import { ADMIN_SCOPE, hasGatewayAdminScope } from "../operator-scopes.js";
 import type { GatewayRequestHandlers } from "./types.js";
-
-function parseNodePayload(payload: unknown, payloadJSON?: string | null): unknown {
-  if (payloadJSON) {
-    try {
-      return JSON.parse(payloadJSON) as unknown;
-    } catch {
-      return undefined;
-    }
-  }
-  return payload;
-}
+import { resolveWorkspacePathContainment } from "./workspace-path-containment.js";
 
 export const fsHandlers: GatewayRequestHandlers = {
-  "fs.listDir": async ({ params, respond, context }) => {
+  "fs.listDir": async ({ params, respond, context, client }) => {
     if (!validateFsListDirParams(params)) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "invalid fs parameters"));
       return;
@@ -74,14 +67,21 @@ export const fsHandlers: GatewayRequestHandlers = {
           params: params.path ? { path: params.path } : {},
         });
         if (!result.ok) {
+          // Keep node request errors (missing or non-directory paths) as request errors so the
+          // picker can fall back to the device home; transport failures stay unavailable.
           respond(
             false,
             undefined,
-            errorShape(ErrorCodes.UNAVAILABLE, result.error?.message ?? "node browse failed"),
+            errorShape(
+              result.error?.code === "INVALID_REQUEST"
+                ? ErrorCodes.INVALID_REQUEST
+                : ErrorCodes.UNAVAILABLE,
+              result.error?.message ?? "node browse failed",
+            ),
           );
           return;
         }
-        const payload = parseNodePayload(result.payload, result.payloadJSON);
+        const payload = result.payloadJSON ? safeParseJson(result.payloadJSON) : result.payload;
         if (!validateFsListDirResult(payload)) {
           respond(
             false,
@@ -93,9 +93,32 @@ export const fsHandlers: GatewayRequestHandlers = {
         respond(true, payload, undefined);
         return;
       }
-      respond(true, await listHostDirectories(params.path), undefined);
+      if (hasGatewayAdminScope(client)) {
+        respond(true, await listHostDirectories(params.path), undefined);
+        return;
+      }
+      const containment = await resolveWorkspacePathContainment(
+        params.path || undefined,
+        context.getRuntimeConfig(),
+        { allowMissing: true },
+      );
+      if (!containment) {
+        respond(
+          false,
+          undefined,
+          missingScopeErrorShape({ missingScope: ADMIN_SCOPE, requiredScopes: [ADMIN_SCOPE] }),
+        );
+        return;
+      }
+      const listing = await listHostDirectories(containment.path);
+      if (listing.path === containment.workspaceRoot) {
+        const { parent: _parent, ...clamped } = listing;
+        respond(true, clamped, undefined);
+        return;
+      }
+      respond(true, listing, undefined);
     } catch (error) {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, String(error)));
+      respond(false, undefined, errorShapeFromError(ErrorCodes.INVALID_REQUEST, error));
     }
   },
 };

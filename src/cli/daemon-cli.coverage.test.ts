@@ -1,9 +1,11 @@
 // Daemon CLI coverage tests cover daemon command branches and output behavior.
+import "../test-utils/prepare-compiled-subprocesses.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mockSystemAccountHome } from "../daemon/service.test-helpers.js";
 import { captureEnv, deleteTestEnvValue, setTestEnvValue } from "../test-utils/env.js";
 import { registerDaemonCli } from "./daemon-cli/register.js";
 
@@ -23,7 +25,10 @@ const serviceReadRuntime = vi.fn().mockResolvedValue({ status: "running" });
 const resolveGatewayProbeAuthSafeWithSecretInputs = vi.fn(async (_opts?: unknown) => ({
   auth: {},
 }));
-const findExtraGatewayServices = vi.fn(async (_env: unknown, _opts?: unknown) => []);
+const findExtraGatewayServices = vi.fn(async (_env: unknown, _opts?: unknown) => ({
+  services: [],
+  errors: [],
+}));
 const inspectPortUsage = vi.fn(async (port: number) => ({
   port,
   status: "free",
@@ -87,11 +92,6 @@ const mocks = await vi.hoisted(async () => {
 
 const { runtimeLogs } = mocks;
 
-vi.mock("../config/paths.js", async () => {
-  const actual = await vi.importActual<typeof import("../config/paths.js")>("../config/paths.js");
-  return { ...actual, isDefaultInstallIdentity: () => true };
-});
-
 vi.mock("./daemon-cli/probe.js", () => ({
   probeGatewayStatus: (opts: unknown) => probeGatewayStatus(opts),
 }));
@@ -138,10 +138,13 @@ vi.mock("../daemon/inspect.js", () => ({
   renderGatewayServiceCleanupHints: () => [],
 }));
 
-vi.mock("../infra/ports.js", () => ({
+vi.mock("../infra/ports-inspect.js", () => ({
   inspectPortConnections: (port: number) => inspectPortConnections(port),
   inspectPortUsage: (port: number) => inspectPortUsage(port),
   inspectPortUsages: (ports: readonly number[]) => inspectPortUsages(ports),
+}));
+
+vi.mock("../infra/ports-format.js", () => ({
   formatPortDiagnostics: () => ["Port 18789 is already in use."],
 }));
 
@@ -166,6 +169,12 @@ vi.mock("./deps.js", () => ({
 
 vi.mock("./progress.js", () => ({
   withProgress: async (_opts: unknown, fn: () => Promise<unknown>) => await fn(),
+}));
+
+vi.mock("./daemon-cli/restart-health.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./daemon-cli/restart-health.js")>()),
+  waitForGatewayHealthyRestart: async () => ({ healthy: true }),
+  waitForGatewayHttpReadiness: async () => ({ healthz: 200, readyz: 200 }),
 }));
 
 let daemonProgram: Command;
@@ -207,13 +216,16 @@ describe("daemon-cli coverage", () => {
     daemonProgram = createDaemonProgram();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-daemon-cli-"));
     envSnapshot = captureEnv([
+      "HOME",
       "OPENCLAW_STATE_DIR",
       "OPENCLAW_CONFIG_PATH",
       "OPENCLAW_GATEWAY_PORT",
       "OPENCLAW_PROFILE",
     ]);
-    setTestEnvValue("OPENCLAW_STATE_DIR", tmpDir);
-    setTestEnvValue("OPENCLAW_CONFIG_PATH", path.join(tmpDir, "openclaw.json"));
+    setTestEnvValue("HOME", tmpDir);
+    setTestEnvValue("OPENCLAW_STATE_DIR", path.join(tmpDir, ".openclaw"));
+    setTestEnvValue("OPENCLAW_CONFIG_PATH", path.join(tmpDir, ".openclaw", "openclaw.json"));
+    mockSystemAccountHome();
     deleteTestEnvValue("OPENCLAW_GATEWAY_PORT");
     deleteTestEnvValue("OPENCLAW_PROFILE");
     serviceReadCommand.mockResolvedValue(null);
@@ -226,6 +238,7 @@ describe("daemon-cli coverage", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     envSnapshot.restore();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });

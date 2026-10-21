@@ -7,11 +7,8 @@
 export {
   abortAndDrainEmbeddedAgentRun,
   abortEmbeddedAgentRun,
-  isEmbeddedAgentRunActive,
-  isEmbeddedAgentRunStreaming,
-  resolveActiveEmbeddedRunSessionId,
+  preemptAndDrainEmbeddedHeartbeatRun,
   resolveActiveEmbeddedRunSessionIdBySessionFile,
   runEmbeddedAgent,
-  resolveEmbeddedSessionLane,
-  waitForEmbeddedAgentRunEnd,
 } from "./embedded-agent.js";
+export { resolveActiveEmbeddedRunBySessionFile } from "./embedded-agent-runner/runs.js";

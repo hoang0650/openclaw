@@ -1,115 +1,109 @@
-// Control UI tests cover Agents page Set Default persistence behavior.
-import { chromium, type Browser } from "playwright";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  canRunPlaywrightChromium,
-  installMockGateway,
-  resolvePlaywrightChromiumExecutablePath,
-  startControlUiE2eServer,
-  type ControlUiE2eServer,
-  type MockGatewayRequest,
-} from "../test-helpers/control-ui-e2e.ts";
+import path from "node:path";
+import { expect, it } from "vitest";
+import { createRequireRecord } from "../../../test/helpers/record.js";
+import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import { agentRoster } from "./agent-roster.test-support.ts";
+import { configSnapshot, createConfigSuite } from "./config-composer-fixtures.test-support.ts";
+import { createControlUiE2eContextOptions } from "./control-ui-e2e-suite.test-support.ts";
 
-const chromiumExecutablePath = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
-const chromiumAvailable = canRunPlaywrightChromium(chromiumExecutablePath);
-const allowMissingChromium = process.env.OPENCLAW_UI_E2E_ALLOW_MISSING_CHROMIUM === "1";
-const describeControlUiE2e = chromiumAvailable || !allowMissingChromium ? describe : describe.skip;
+const suite = createConfigSuite("Control UI agents Set Default mocked Gateway E2E");
 
-let browser: Browser;
-let server: ControlUiE2eServer;
+const requireRecord = createRequireRecord("record", "expected-object-value");
 
-function requireRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Expected object value");
-  }
-  return value as Record<string, unknown>;
+function configResponse(config: Record<string, unknown>, hash: string) {
+  return { ...configSnapshot(config, hash), sourceConfig: config };
 }
 
-function requestParams(request: MockGatewayRequest): Record<string, unknown> {
-  return requireRecord(request.params);
-}
-
-describeControlUiE2e("Control UI agents Set Default mocked Gateway E2E", () => {
-  beforeAll(async () => {
-    if (!chromiumAvailable) {
-      throw new Error(
-        `Playwright Chromium is not installed or cannot start at ${chromiumExecutablePath}. Run \`pnpm --dir ui exec playwright install --with-deps chromium\`, or set OPENCLAW_UI_E2E_ALLOW_MISSING_CHROMIUM=1 only when intentionally skipping this lane.`,
-      );
-    }
-    server = await startControlUiE2eServer();
-    browser = await chromium.launch({ executablePath: chromiumExecutablePath });
-  });
-
-  afterAll(async () => {
-    await browser?.close();
-    await server?.close();
-  });
-
+suite.define(() => {
   it("persists Set Default through config.set instead of only staging the form draft", async () => {
-    const context = await browser.newContext({
-      locale: "en-US",
-      serviceWorkers: "block",
-      viewport: { height: 900, width: 1280 },
-    });
-    const page = await context.newPage();
-    const initialConfig = {
-      agents: { entries: { main: { default: true }, kimi: {} } },
-    };
-    const savedConfig = {
-      agents: { entries: { main: {}, kimi: { default: true } } },
-    };
-    const gateway = await installMockGateway(page, {
-      assistantName: "Main agent",
-      defaultAgentId: "main",
-      methodResponses: {
-        "agents.list": {
-          agents: [
-            { id: "main", name: "Main agent" },
-            { id: "kimi", name: "Kimi agent" },
-          ],
-          defaultId: "main",
-          mainKey: "main",
-          scope: "agent",
+    await suite.withPage(createControlUiE2eContextOptions(), async ({ page }) => {
+      const makeConfig = (agentId: string) => ({
+        agents: {
+          ownership: "explicit",
+          defaults: { systemAgent: { agentId } },
+          entries: { main: {}, kimi: {} },
         },
-        "config.get": {
-          config: initialConfig,
-          sourceConfig: initialConfig,
-          hash: "hash-1",
-          issues: [],
-          raw: JSON.stringify(initialConfig),
-          valid: true,
+      });
+      const initialConfig = makeConfig("main");
+      const savedConfig = makeConfig("kimi");
+      const gateway = await installMockGateway(page, {
+        assistantName: "Main agent",
+        defaultAgentId: "main",
+        methodResponses: {
+          "agents.list": agentRoster({ main: "Main agent", kimi: "Kimi agent" }, "main", "agent"),
+          "config.get": configResponse(initialConfig, "hash-1"),
+          "config.set": configResponse(savedConfig, "hash-2"),
         },
-        "config.set": {
-          config: savedConfig,
-          sourceConfig: savedConfig,
-          hash: "hash-2",
-          issues: [],
-          raw: JSON.stringify(savedConfig),
-          valid: true,
-        },
-      },
-    });
+      });
 
-    try {
-      const response = await page.goto(`${server.baseUrl}agents`);
+      const response = await page.goto(`${suite.server.baseUrl}settings/agents`);
       expect(response?.status()).toBe(200);
 
-      // Click auto-waits for the elements to be actionable (enabled), so
-      // these implicitly assert the dropdown loaded and Set Default is clickable for a
-      // non-default agent.
-      const agentSelect = page.locator("wa-dropdown.agent-select");
+      const agentSelect = page.locator("openclaw-agent-select");
       await agentSelect.locator(".agent-select__trigger").click();
       await agentSelect.getByRole("menuitemradio", { name: "Kimi agent", exact: true }).click();
       await page.getByRole("button", { name: "Set Default", exact: true }).click();
 
-      // The fix routes Set Default through the canonical save path; without it the click
-      // only stages a form draft and never emits config.set, so this request never arrives.
+      // A draft-only update never emits config.set.
       const setRequest = await gateway.waitForRequest("config.set");
-      const raw = requestParams(setRequest).raw;
-      expect(JSON.parse(String(raw))).toEqual(savedConfig);
-      expect(requireRecord(JSON.parse(String(raw))).agents).not.toHaveProperty("list");
-    } finally {
-      await context.close();
-    }
+      const saved = JSON.parse(String(requireRecord(setRequest.params).raw));
+      expect(saved).toEqual(savedConfig);
+      expect(requireRecord(saved).agents).not.toHaveProperty("list");
+    });
   });
+
+  it.each([true, false])(
+    "uses Gateway ownership for Set Default state (selection required: %s)",
+    async (selectionRequired) => {
+      await suite.withPage(createControlUiE2eContextOptions(), async ({ page }) => {
+        const defaultId = selectionRequired ? "main" : "research";
+        const config = {
+          agents: {
+            ownership: "explicit",
+            entries: { main: {}, research: {} },
+            ...(!selectionRequired ? { defaults: { systemAgent: { agentId: "research" } } } : {}),
+          },
+        };
+        const gateway = await installMockGateway(page, {
+          defaultAgentId: defaultId,
+          methodResponses: {
+            "agents.list": {
+              ...agentRoster(
+                { main: "Main agent", research: "Research agent" },
+                defaultId,
+                "per-sender",
+              ),
+              ownership: "explicit",
+              selectionRequired,
+            },
+            "config.get": configResponse(config, "roster-hash"),
+          },
+        });
+
+        await page.goto(`${suite.server.baseUrl}settings/agents`);
+        await gateway.waitForRequest("agents.list");
+        await page.locator(".agent-select__trigger").click();
+        await page.getByRole("menuitemradio", { name: /Research agent/ }).waitFor();
+        await page.screenshot({
+          path: path.join(
+            suite.artifactDir,
+            selectionRequired ? "ownerless.png" : "designated.png",
+          ),
+        });
+        expect(await page.locator(".agent-select__option .agent-select__badge").count()).toBe(0);
+        await page
+          .getByRole("menuitemradio", {
+            name: selectionRequired ? "Main agent" : "Research agent",
+            exact: true,
+          })
+          .click();
+        const defaultAction = page.getByRole("button", {
+          name: selectionRequired ? "Set Default" : "Default",
+          exact: true,
+        });
+        await defaultAction.waitFor();
+        await expect.poll(() => defaultAction.isDisabled()).toBe(!selectionRequired);
+      });
+    },
+  );
 });

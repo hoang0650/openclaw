@@ -1,27 +1,14 @@
 /** Covers cloud-worker provider manifest ownership, uniqueness, and lookup ordering. */
 import { describe, expect, it } from "vitest";
 import { createPluginRecord } from "./loader-records.js";
-import { createPluginRegistry } from "./registry.js";
-import type { PluginRuntime } from "./runtime/types.js";
+import { createTestPluginRegistry as createTestRegistry } from "./registry-runtime.test-helpers.js";
 import type { WorkerProvider } from "./types.js";
-import { resolveDurableWorkerProviderAutoEnabledReasons } from "./worker-provider-registry.js";
-
-function createTestRegistry() {
-  return createPluginRegistry({
-    logger: {
-      info() {},
-      warn() {},
-      error() {},
-      debug() {},
-    },
-    runtime: {} as PluginRuntime,
-    activateGlobalSideEffects: false,
-  });
-}
+import { resolveDurableWorkerProviderAutoEnabledReasons } from "./worker-provider-manifest.js";
 
 function createWorkerProvider(id: string): WorkerProvider {
   return {
     id,
+    resolveAllocation: async () => ({ leaseId: "unused", sharedHost: false }),
     provision: async () => {
       throw new Error("not called");
     },
@@ -42,84 +29,98 @@ function createOwner(id: string, workerProviders: string[] = []) {
   });
 }
 
+function expectRejected(
+  provider: WorkerProvider,
+  message: unknown,
+  declaredIds = ["static-ssh"],
+  diagnostic = {},
+) {
+  const { registry, registerWorkerProvider } = createTestRegistry();
+  registerWorkerProvider(createOwner("owner", declaredIds), provider);
+  expect(registry.workerProviders.size).toBe(0);
+  expect(registry.diagnostics).toContainEqual(expect.objectContaining({ message, ...diagnostic }));
+}
+
 describe("worker provider registry", () => {
   it("rejects registrations missing manifest ownership", () => {
-    const pluginRegistry = createTestRegistry();
-
-    pluginRegistry.registerWorkerProvider(createOwner("owner"), createWorkerProvider("static-ssh"));
-
-    expect(pluginRegistry.registry.workerProviders.size).toBe(0);
-    expect(pluginRegistry.registry.diagnostics).toContainEqual(
-      expect.objectContaining({
-        level: "error",
-        pluginId: "owner",
-        message: "plugin must declare contracts.workerProviders for provider: static-ssh",
-      }),
+    expectRejected(
+      createWorkerProvider("static-ssh"),
+      "plugin must declare contracts.workerProviders for provider: static-ssh",
+      [],
+      { level: "error", pluginId: "owner" },
     );
   });
 
-  it("rejects incomplete provider contracts", () => {
-    const pluginRegistry = createTestRegistry();
+  it("rejects a missing resolveAllocation method", () => {
     const provider = createWorkerProvider("static-ssh");
-    delete (provider as Partial<WorkerProvider>).inspect;
+    delete (provider as Partial<WorkerProvider>).resolveAllocation;
+    expectRejected(provider, "worker provider registration missing method: resolveAllocation");
+  });
 
-    pluginRegistry.registerWorkerProvider(createOwner("owner", ["static-ssh"]), provider);
+  it.each(["renew", "runSetupCommand"] as const)(
+    "rejects a non-function optional %s hook",
+    (method) => {
+      const provider = {
+        ...createWorkerProvider("static-ssh"),
+        [method]: "later",
+      } as unknown as WorkerProvider;
 
-    expect(pluginRegistry.registry.workerProviders.size).toBe(0);
-    expect(pluginRegistry.registry.diagnostics).toContainEqual(
-      expect.objectContaining({ message: "worker provider registration missing method: inspect" }),
+      expectRejected(provider, `worker provider registration ${method} must be a function`);
+    },
+  );
+
+  it("rejects a non-boolean provision-before-installation declaration", () => {
+    const provider = {
+      ...createWorkerProvider("static-ssh"),
+      provisionBeforeInstallation: "sometimes",
+    } as unknown as WorkerProvider;
+
+    expectRejected(
+      provider,
+      "worker provider registration provisionBeforeInstallation must be a boolean",
     );
   });
 
-  it("rejects a non-function optional renew hook", () => {
+  it("registers both placement modes in canonical order", () => {
     const pluginRegistry = createTestRegistry();
     const provider = {
       ...createWorkerProvider("static-ssh"),
-      renew: "later",
-    } as unknown as WorkerProvider;
+      supportedExecutionModes: ["worker-turn", "remote-exec"],
+    } satisfies WorkerProvider;
 
     pluginRegistry.registerWorkerProvider(createOwner("owner", ["static-ssh"]), provider);
 
-    expect(pluginRegistry.registry.workerProviders.size).toBe(0);
-    expect(pluginRegistry.registry.diagnostics).toContainEqual(
-      expect.objectContaining({
-        message: "worker provider registration renew must be a function",
-      }),
+    expect(pluginRegistry.registry.workerProviders.get("static-ssh")?.provider).toBe(provider);
+    expect(pluginRegistry.registry.diagnostics).toEqual([]);
+  });
+
+  it("rejects an unknown mode in a placement declaration", () => {
+    const provider = {
+      ...createWorkerProvider("static-ssh"),
+      supportedExecutionModes: ["unsupported"],
+    } as unknown as WorkerProvider;
+
+    expectRejected(
+      provider,
+      expect.stringContaining("worker provider registration supportedExecutionModes"),
     );
   });
 
   it("rejects a non-function optional SSH identity resolver", () => {
-    const pluginRegistry = createTestRegistry();
     const provider = {
       ...createWorkerProvider("static-ssh"),
       resolveSshIdentity: "later",
     } as unknown as WorkerProvider;
 
-    pluginRegistry.registerWorkerProvider(createOwner("owner", ["static-ssh"]), provider);
-
-    expect(pluginRegistry.registry.workerProviders.size).toBe(0);
-    expect(pluginRegistry.registry.diagnostics).toContainEqual(
-      expect.objectContaining({
-        message: "worker provider registration resolveSshIdentity must be a function",
-      }),
-    );
+    expectRejected(provider, "worker provider registration resolveSshIdentity must be a function");
   });
 
   it("rejects invalid provider ids", () => {
-    const pluginRegistry = createTestRegistry();
-
-    pluginRegistry.registerWorkerProvider(
-      createOwner("owner", ["__proto__"]),
+    expectRejected(
       createWorkerProvider("__proto__"),
-    );
-
-    expect(pluginRegistry.registry.workerProviders.size).toBe(0);
-    expect(pluginRegistry.registry.diagnostics).toContainEqual(
-      expect.objectContaining({
-        level: "error",
-        pluginId: "owner",
-        message: "worker provider registration missing valid id",
-      }),
+      "worker provider registration missing valid id",
+      ["__proto__"],
+      { level: "error", pluginId: "owner" },
     );
   });
 

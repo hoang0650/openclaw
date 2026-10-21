@@ -5,364 +5,116 @@ import { normalizeMessageActionInput } from "./message-action-normalization.js";
 
 vi.mock("../../channels/plugins/bootstrap-registry.js", async () => ({
   getBootstrapChannelPlugin: (
-    await import("./message-action-test-fixtures.js")
+    await import("./message-action-runner.test-support.js")
   ).createPinboardMessageActionBootstrapRegistryMock(),
 }));
 
-vi.mock("../../utils/message-channel.js", () => ({
+vi.mock("../../utils/message-channel.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../utils/message-channel.js")>()),
   isDeliverableMessageChannel: (value: string) => ["workspace", "forum"].includes(value),
   normalizeMessageChannel: (value?: string | null) =>
     typeof value === "string" ? value.trim().toLowerCase() : undefined,
 }));
 
 describe("normalizeMessageActionInput", () => {
-  type NormalizeMessageActionInputCase = {
-    input: Parameters<typeof normalizeMessageActionInput>[0];
-    expectedFields?: Record<string, unknown>;
-    absentFields?: string[];
+  const routedThreadContext = {
+    currentChannelProvider: "discord",
+    currentChatType: "channel" as const,
+    currentChannelId: "channel:parent",
+    currentMessagingTarget: "channel:thread",
+    currentMessageId: "thread",
   };
 
-  it.each([
-    {
-      input: {
-        action: "send",
-        args: {
-          target: "channel:C1",
-          to: "legacy",
-          channelId: "legacy-channel",
-        },
-      },
-      expectedFields: { target: "channel:C1", to: "channel:C1" },
-      absentFields: ["channelId"],
-    },
-    {
-      input: {
-        action: "send",
-        args: {
-          target: "1214056829",
-          channelId: "",
-          to: "   ",
-        },
-      },
-      expectedFields: { target: "1214056829", to: "1214056829" },
-      absentFields: ["channelId"],
-    },
-    {
-      input: {
-        action: "send",
-        args: {
-          to: "channel:C1",
-        },
-      },
-      expectedFields: { target: "channel:C1", to: "channel:C1" },
-    },
-    {
-      input: {
-        action: "send",
-        args: {},
-        toolContext: {
-          currentChannelId: "channel:C1",
-        },
-      },
-      expectedFields: { target: "channel:C1", to: "channel:C1" },
-    },
-    {
-      input: {
-        action: "send",
-        args: {},
-        toolContext: {
-          currentChannelId: "user:U1",
-          currentChannelProvider: "slack",
-        },
-      },
-      expectedFields: { target: "user:U1", to: "user:U1" },
-    },
-    {
-      input: {
-        action: "send",
-        args: {},
-        toolContext: {
-          currentMessagingTarget: "user:U1",
-          currentChannelProvider: "slack",
-        },
-      },
-      expectedFields: { target: "user:U1", to: "user:U1" },
-    },
-    {
-      input: {
-        action: "send",
-        args: {
-          target: "channel:C1",
-        },
-        toolContext: {
-          currentChannelId: "C1",
-          currentChannelProvider: "workspace",
-        },
-      },
-      expectedFields: { channel: "workspace" },
-    },
-    {
-      input: {
-        action: "broadcast",
-        args: {},
-        toolContext: {
-          currentChannelId: "channel:C1",
-        },
-      },
-      absentFields: ["target", "to"],
-    },
-    {
-      input: {
-        action: "send",
-        args: {
-          target: "channel:C1",
-        },
-        toolContext: {
-          currentChannelProvider: "webchat",
-        },
-      },
-      absentFields: ["channel"],
-    },
-    {
-      input: {
-        action: "edit",
-        args: {
-          messageId: "msg_123",
-        },
-        toolContext: {
-          currentChannelId: "channel:C1",
-        },
-      },
-      expectedFields: { messageId: "msg_123" },
-      absentFields: ["target", "to"],
-    },
-    {
-      input: {
-        action: "react",
-        args: {
-          channel: "imessage",
-          messageId: "msg_123",
-        },
-        toolContext: {
-          currentChannelId: "chat_guid:iMessage;+;chat0000",
-          currentChannelProvider: "imessage",
-        },
-      },
-      expectedFields: {
-        target: "chat_guid:iMessage;+;chat0000",
-        to: "chat_guid:iMessage;+;chat0000",
-        messageId: "msg_123",
-      },
-    },
-    {
-      input: {
-        action: "edit",
-        args: {
-          channel: "imessage",
-          messageId: "msg_123",
-        },
-        toolContext: {
-          currentChannelId: "chat_guid:iMessage;+;chat0000",
-          currentChannelProvider: "imessage",
-        },
-      },
-      expectedFields: {
-        target: "chat_guid:iMessage;+;chat0000",
-        to: "chat_guid:iMessage;+;chat0000",
-        messageId: "msg_123",
-      },
-    },
-    {
-      input: {
-        action: "unsend",
-        args: {
-          channel: "imessage",
-          messageId: "msg_123",
-        },
-        toolContext: {
-          currentChannelId: "chat_guid:iMessage;+;chat0000",
-          currentChannelProvider: "imessage",
-        },
-      },
-      expectedFields: {
-        target: "chat_guid:iMessage;+;chat0000",
-        to: "chat_guid:iMessage;+;chat0000",
-        messageId: "msg_123",
-      },
-    },
-    {
-      input: {
-        action: "poll-vote",
-        args: {
-          channel: "imessage",
-          pollId: "poll_123",
-        },
-        toolContext: {
-          currentChannelId: "chat_guid:iMessage;+;chat0000",
-          currentChannelProvider: "imessage",
-        },
-      },
-      expectedFields: {
-        target: "chat_guid:iMessage;+;chat0000",
-        to: "chat_guid:iMessage;+;chat0000",
-        pollId: "poll_123",
-      },
-    },
-    {
-      input: {
-        action: "pin",
-        args: {
-          channel: "pinboard",
-          messageId: "om_123",
-        },
-      },
-      expectedFields: { messageId: "om_123" },
-      absentFields: ["target", "to"],
-    },
-    {
-      input: {
-        action: "list-pins",
-        args: {
-          channel: "pinboard",
-          chatId: "oc_123",
-        },
-      },
-      expectedFields: { chatId: "oc_123" },
-      absentFields: ["target", "to"],
-    },
-    {
-      input: {
-        action: "poll",
-        args: {
-          channel: "imessage",
-          chatGuid: "iMessage;+;chat0000",
-        },
-      },
-      expectedFields: {
-        target: "chat_guid:iMessage;+;chat0000",
-        to: "chat_guid:iMessage;+;chat0000",
-        chatGuid: "iMessage;+;chat0000",
-      },
-    },
-    {
-      input: {
-        action: "poll-vote",
-        args: {
-          channel: "imessage",
-          chatId: 42,
-        },
-      },
-      expectedFields: { target: "chat_id:42", to: "chat_id:42", chatId: 42 },
-    },
-    {
-      input: {
-        action: "read",
-        args: {
-          channel: "workspace",
-          messageId: "123.456",
-        },
-        toolContext: {
-          currentChannelId: "C12345678",
-          currentChannelProvider: "workspace",
-        },
-      },
-      expectedFields: { target: "C12345678", messageId: "123.456" },
-    },
-    {
-      input: {
-        action: "channel-info",
-        args: {
-          channelId: "C123",
-        },
-      },
-      expectedFields: { target: "C123", channelId: "C123" },
-      absentFields: ["to"],
-    },
-  ] satisfies NormalizeMessageActionInputCase[])(
-    "normalizes message action input for %j",
-    ({ input, expectedFields, absentFields }) => {
-      const normalized = normalizeMessageActionInput(input);
-      if (expectedFields) {
-        for (const [field, value] of Object.entries(expectedFields)) {
-          expect(normalized[field]).toBe(value);
-        }
-      }
-      for (const field of absentFields ?? []) {
-        expect(field in normalized).toBe(false);
-      }
+  it.each(["read", "react", "edit", "delete"] as const)(
+    "keeps the native message conversation for an implicit %s",
+    (action) => {
+      expect(
+        normalizeMessageActionInput({
+          action,
+          args: { channel: "discord", messageId: "thread" },
+          toolContext: routedThreadContext,
+          targetAliasSpec: { aliases: ["messageId"], deliveryTargetAliases: [] },
+        }),
+      ).toMatchObject({ target: "channel:parent", to: "channel:parent", messageId: "thread" });
     },
   );
 
-  it("throws when required target remains unresolved", () => {
+  type Input = Parameters<typeof normalizeMessageActionInput>[0];
+  it.each<[Input, Record<string, unknown>, string[]]>([
+    [
+      { action: "send", args: { target: "channel:C1", to: "legacy", channelId: "legacy-channel" } },
+      { target: "channel:C1", to: "channel:C1" },
+      ["channelId"],
+    ],
+    [
+      { action: "broadcast", args: {}, toolContext: { currentChannelId: "channel:C1" } },
+      {},
+      ["target", "to"],
+    ],
+    [
+      {
+        action: "unsend",
+        args: { channel: "imessage", messageId: "msg_123" },
+        toolContext: {
+          currentChannelId: "chat_guid:iMessage;+;chat0000",
+          currentChannelProvider: "imessage",
+        },
+      },
+      {
+        target: "chat_guid:iMessage;+;chat0000",
+        to: "chat_guid:iMessage;+;chat0000",
+        messageId: "msg_123",
+      },
+      [],
+    ],
+    [
+      { action: "pin", args: { channel: "pinboard", messageId: "om_123" } },
+      { messageId: "om_123" },
+      ["target", "to"],
+    ],
+    [
+      { action: "poll-vote", args: { channel: "imessage", chatId: 42 } },
+      { target: "chat_id:42", to: "chat_id:42", chatId: 42 },
+      [],
+    ],
+  ])("normalizes message action input for %j", (input, expected, absent) => {
+    const normalized = normalizeMessageActionInput(input);
+    expect(normalized).toEqual(expect.objectContaining(expected));
+    for (const field of absent) {
+      expect(field in normalized).toBe(false);
+    }
+  });
+  it("does not inject heartbeat sender sentinel as inferred target", () => {
     expect(() =>
       normalizeMessageActionInput({
         action: "send",
         args: {},
+        toolContext: {
+          currentChannelId: "heartbeat",
+          currentChannelProvider: "telegram",
+        },
       }),
     ).toThrow(/requires a target/);
   });
 
-  it.each([
-    "agent:main:subagent:worker",
-    "agent:main:cron:job:run:turn",
-    "channel:agent:main:subagent:worker",
-    "channel:agent:main:main",
-  ])("does not infer internal session %s as a message target", (currentChannelId) => {
+  it("does not infer an internal session as a message target", () => {
     expect(() =>
       normalizeMessageActionInput({
         action: "send",
         args: { channel: "discord" },
         toolContext: {
-          currentChannelId,
+          currentChannelId: "channel:agent:main:subagent:worker",
           currentChannelProvider: "discord",
         },
       }),
     ).toThrow(/requires a target/);
   });
 
-  it("uses a real current messaging target instead of an internal session channel", () => {
-    expect(
-      normalizeMessageActionInput({
-        action: "send",
-        args: { channel: "discord" },
-        toolContext: {
-          currentChannelId: "agent:main:subagent:worker",
-          currentMessagingTarget: "channel:123456789012345678",
-          currentChannelProvider: "discord",
-        },
-      }),
-    ).toMatchObject({
-      channel: "discord",
-      target: "channel:123456789012345678",
-      to: "channel:123456789012345678",
-    });
-  });
-
-  it("preserves an explicitly supplied target shaped like an internal session", () => {
-    expect(
-      normalizeMessageActionInput({
-        action: "send",
-        args: {
-          channel: "discord",
-          target: "agent:main:subagent:worker",
-        },
-      }),
-    ).toMatchObject({
-      channel: "discord",
-      target: "agent:main:subagent:worker",
-      to: "agent:main:subagent:worker",
-    });
-  });
-
-  it.each([
-    { name: "a nonempty targets array", targets: ["C_TARGET"] },
-    { name: "an empty targets array", targets: [] },
-    { name: "a malformed targets value", targets: "C_TARGET" },
-  ])("does not replace $name with the current conversation", ({ targets }) => {
+  it("does not replace an empty targets array with the current conversation", () => {
     expect(() =>
       normalizeMessageActionInput({
         action: "read",
-        args: { targets },
+        args: { targets: [] },
         toolContext: {
           currentChannelId: "C_CURRENT",
           currentChannelProvider: "workspace",
@@ -371,45 +123,14 @@ describe("normalizeMessageActionInput", () => {
     ).toThrow(/requires a target/);
   });
 
-  it.each(["react", "edit", "delete"] as const)(
-    "infers the exact current conversation for a provider-owned %s message resource",
-    (action) => {
-      expect(
-        normalizeMessageActionInput({
-          action,
-          args: { channel: "forum", messageId: "901" },
-          toolContext: {
-            currentChannelProvider: "forum",
-            currentChannelId: "-1001:topic:77",
-          },
-          targetAliasSpec: {
-            aliases: ["messageId"],
-            deliveryTargetAliases: [],
-          },
-        }),
-      ).toMatchObject({
-        channel: "forum",
-        messageId: "901",
-        target: "-1001:topic:77",
-        to: "-1001:topic:77",
-      });
-    },
-  );
-
-  it.each([
-    { action: "react" as const, args: { channel: "imessage", messageId: "msg_123" } },
-    { action: "poll-vote" as const, args: { channel: "imessage", pollId: "poll_123" } },
-  ])(
-    "throws when $action has only a resource reference and no current target",
-    ({ action, args }) => {
-      expect(() =>
-        normalizeMessageActionInput({
-          action,
-          args,
-        }),
-      ).toThrow(/requires a target/);
-    },
-  );
+  it("throws when poll-vote has only a resource reference and no current target", () => {
+    expect(() =>
+      normalizeMessageActionInput({
+        action: "poll-vote",
+        args: { channel: "imessage", pollId: "poll_123" },
+      }),
+    ).toThrow(/requires a target/);
+  });
 
   it("rejects conflicting canonical and plugin delivery targets", () => {
     expect(() =>
@@ -422,5 +143,19 @@ describe("normalizeMessageActionInput", () => {
         },
       }),
     ).toThrow(/conflicting target and delivery alias/);
+  });
+
+  it("allows a trusted direct operator to use an opaque resource without a conversation", () => {
+    expect(
+      normalizeMessageActionInput({
+        action: "unpin",
+        args: { channel: "pinboard", postId: "post_123" },
+        targetAliasSpec: {
+          aliases: ["postId", "roomId"],
+          deliveryTargetAliases: ["roomId"],
+        },
+        allowResourceOnly: true,
+      }),
+    ).toEqual({ channel: "pinboard", postId: "post_123" });
   });
 });

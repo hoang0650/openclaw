@@ -23,7 +23,11 @@ const approval = {
   expiresAtMs: 1_780_001_800_000,
 } as const;
 
-const pending = { ...approval, status: "pending" } as const;
+const pending = {
+  ...approval,
+  status: "pending",
+  sourceSessionKey: "agent:worker:subagent:child",
+} as const;
 const terminal = {
   ...approval,
   status: "denied",
@@ -128,7 +132,7 @@ describe("session approval protocol validators", () => {
     ).toBe(false);
   });
 
-  it("replays only authoritative pending approval snapshots", () => {
+  it("keeps pending replay authoritative", () => {
     const replay = {
       sessionKey: "agent:main:main",
       updatedAtMs: approval.createdAtMs,

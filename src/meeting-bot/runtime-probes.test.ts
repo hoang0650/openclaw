@@ -1,121 +1,165 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MeetingPlatformAdapter } from "./platform-adapter.js";
-import { createMeetingRuntimeProbes } from "./runtime-probes.js";
-import type { MeetingBrowserHealth } from "./session-types.js";
+import { createMeetingRuntimeProbes, resolveMeetingProbeTimeoutMs } from "./runtime-probes.js";
+import type { MeetingPluginProbeHealth } from "./session-types.js";
 
-type Mode = "agent" | "bidi" | "transcribe";
-type Transport = "chrome" | "chrome-node";
-type Health = MeetingBrowserHealth & {
-  transcriptLines?: number;
-  lastCaptionAt?: string;
-  lastCaptionText?: string;
-};
 type Session = {
   id: string;
   chrome?: {
     launched: boolean;
-    browserTab?: { targetId?: string };
-    health?: Health;
+    health?: MeetingPluginProbeHealth;
   };
 };
-type Request = {
-  url: string;
-  mode?: Mode;
-  transport?: Transport;
-  timeoutMs?: number;
-  message?: string;
-  agentId?: string;
-};
-type Config = {
-  defaultMode: Mode;
-  chrome: { joinTimeoutMs: number };
-  chromeNode: { node?: string };
+type CreateProbeOptions = {
+  invalidRequest?: (message: string) => Error;
+  shouldWaitForListening?: (session: Session) => boolean;
 };
 
-const cases = [
-  {
-    name: "Google Meet",
-    invalidRequestName: "Error",
-    session: { id: "google", chrome: { launched: true } } satisfies Session,
-    shouldWaitForListening: (session: Session) => Boolean(session.chrome?.launched),
-    waitsForListening: true,
-  },
-  {
-    name: "Teams",
-    invalidRequestName: "Error",
-    session: { id: "teams", chrome: { launched: true } } satisfies Session,
-    shouldWaitForListening: (session: Session) => Boolean(session.chrome?.launched),
-    waitsForListening: true,
-  },
-  {
-    name: "Zoom",
-    invalidRequestName: "ZoomInvalidRequest",
-    session: { id: "zoom", chrome: { launched: true } } satisfies Session,
-    shouldWaitForListening: (session: Session) => Boolean(session.chrome?.browserTab?.targetId),
-    waitsForListening: false,
-  },
-] as const;
+const URL = "https://example.test/meeting";
+const config = { defaultMode: "agent" as const, chrome: { joinTimeoutMs: 30_000 }, chromeNode: {} };
+const listenRequest = { url: URL, mode: "transcribe" as const, timeoutMs: 100 };
+const speechRequest = { url: URL, mode: "agent" as const };
 
-describe.each(cases)("$name meeting runtime probe parity", (testCase) => {
-  const createProbes = () =>
-    createMeetingRuntimeProbes<Config, Mode, Transport, Health, Session, Request>({
-      defaultSpeechMessage: `Say exactly: ${testCase.name} speech test complete.`,
-      invalidRequest: (message) => {
-        const error = new Error(message);
-        error.name = testCase.invalidRequestName;
-        return error;
-      },
-      resolveTimeoutMs: () => 5,
-      shouldWaitForListening: testCase.shouldWaitForListening,
-      talkBackMode: MeetingPlatformAdapter.isTalkBackMode,
+function createSession(id: string, health: MeetingPluginProbeHealth = {}): Session {
+  return { id, chrome: { launched: true, health } };
+}
+
+function createProbes(options: CreateProbeOptions = {}) {
+  return createMeetingRuntimeProbes<
+    typeof config,
+    "agent" | "bidi" | "transcribe",
+    "chrome" | "chrome-node",
+    MeetingPluginProbeHealth,
+    Session,
+    { url: string; mode?: "agent" | "bidi" | "transcribe"; timeoutMs?: number }
+  >({
+    defaultSpeechMessage: "Say exactly: meeting speech test complete.",
+    invalidRequest: options.invalidRequest ?? ((message) => new Error(message)),
+    resolveTimeoutMs: resolveMeetingProbeTimeoutMs,
+    shouldWaitForListening: options.shouldWaitForListening ?? (() => true),
+    talkBackMode: MeetingPlatformAdapter.isTalkBackMode,
+  });
+}
+
+type ProbeContext = Parameters<ReturnType<typeof createProbes>["testSpeech"]>[0];
+
+function createContext(params: {
+  session: Session;
+  spoken?: boolean;
+  hasHealthHandle?: boolean;
+  refreshHealth?: () => void;
+  refreshCaptionHealth?: (session: Session, timeoutMs?: number) => Promise<void>;
+}): ProbeContext {
+  return {
+    config,
+    resolveAgentId: () => "main",
+    list: () => [],
+    join: vi.fn(async () => ({ session: params.session, spoken: params.spoken })),
+    isReusable: () => false,
+    hasHealthHandle: () => params.hasHealthHandle ?? false,
+    refreshHealth: params.refreshHealth ?? vi.fn(),
+    refreshCaptionHealth: params.refreshCaptionHealth ?? vi.fn(async () => undefined),
+  };
+}
+
+afterEach(() => vi.useRealTimers());
+
+describe("meeting runtime probes", () => {
+  it("uses the supplied invalid-request factory", async () => {
+    const probes = createProbes({
+      invalidRequest: (message) =>
+        Object.assign(new Error(message), { name: "ProbeInvalidRequest" }),
     });
 
-  it("preserves the platform invalid-request contract", async () => {
-    const probes = createProbes();
     await expect(
-      probes.testSpeech(
-        {
-          config: { defaultMode: "agent", chrome: { joinTimeoutMs: 5 }, chromeNode: {} },
-          resolveAgentId: () => "main",
-          list: () => [],
-          join: vi.fn(),
-          isReusable: () => false,
-          hasHealthHandle: () => false,
-          refreshHealth: vi.fn(),
-          refreshCaptionHealth: vi.fn(),
-        },
-        { url: "https://example.test/meeting", mode: "transcribe" },
-      ),
+      probes.testSpeech(createContext({ session: { id: "unused" } }), listenRequest),
     ).rejects.toMatchObject({
-      name: testCase.invalidRequestName,
+      name: "ProbeInvalidRequest",
       message: "test_speech requires mode: agent or bidi",
     });
   });
 
-  it("preserves the platform listening wait ownership", async () => {
+  it("uses the per-request speech verification timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const session = createSession("speech-timeout", { inCall: true, lastOutputBytes: 0 });
+    const refreshHealth = vi.fn();
     const probes = createProbes();
-    const refreshCaptionHealth = vi.fn(async () => undefined);
-    const context = {
-      config: { defaultMode: "agent" as const, chrome: { joinTimeoutMs: 5 }, chromeNode: {} },
-      resolveAgentId: () => "main",
-      list: () => [],
-      join: vi.fn(async () => ({ session: testCase.session })),
-      isReusable: () => false,
-      hasHealthHandle: () => false,
-      refreshHealth: vi.fn(),
-      refreshCaptionHealth,
+
+    const pending = probes.testSpeech(
+      createContext({ session, spoken: true, hasHealthHandle: true, refreshHealth }),
+      { ...speechRequest, timeoutMs: 150 },
+    );
+    await vi.advanceTimersByTimeAsync(200);
+
+    await expect(pending).resolves.toMatchObject({ speechOutputTimedOut: true });
+    expect(refreshHealth).toHaveBeenCalled();
+  });
+
+  it("requires a fresh verified output generation", async () => {
+    const probes = createProbes();
+    for (const [verifiedOutputGeneration, expected] of [
+      [undefined, false],
+      [1, true],
+    ] as const) {
+      const session = createSession(`speech-generation-${String(verifiedOutputGeneration)}`, {
+        inCall: true,
+        lastOutputBytes: 4,
+        outputGeneration: 1,
+        verifiedOutputGeneration,
+      });
+
+      const result = await probes.testSpeech(
+        createContext({ session, spoken: true }),
+        speechRequest,
+      );
+
+      expect(result.speechOutputVerified).toBe(expected);
+    }
+  });
+
+  it.each([false, true])(
+    "returns manual action with caption progress=%s before the deadline",
+    async (captions) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      const session = createSession("listen-progress");
+      const manualAction = { reason: "admission-required", message: "Waiting" };
+      const refreshCaptionHealth = vi.fn(async () => {
+        session.chrome!.health = {
+          manualAction,
+          ...(captions ? { lastCaptionText: "Caption already waiting", transcriptLines: 1 } : {}),
+        };
+      });
+      const probes = createProbes({ shouldWaitForListening: () => true });
+      const result = await probes.testListening(
+        createContext({ session, refreshCaptionHealth }),
+        listenRequest,
+      );
+      expect(result).toMatchObject({ listenVerified: captions, manualAction });
+      expect(refreshCaptionHealth).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("rejects caption progress that arrives after the deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const session = createSession("listen-late");
+    const probes = createProbes();
+    const refreshCaptionHealth = async (_session: Session, timeoutMs?: number) => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, (timeoutMs ?? 0) + 50);
+      });
+      session.chrome!.health = { lastCaptionText: "Too late", transcriptLines: 1 };
     };
 
-    await probes.testListening(context, {
-      url: "https://example.test/meeting",
-      mode: "transcribe",
-      timeoutMs: 5,
+    const pending = probes.testListening(createContext({ session, refreshCaptionHealth }), {
+      ...listenRequest,
+      timeoutMs: 300,
     });
+    await vi.advanceTimersByTimeAsync(400);
 
-    if (testCase.waitsForListening) {
-      expect(refreshCaptionHealth).toHaveBeenCalled();
-    } else {
-      expect(refreshCaptionHealth).not.toHaveBeenCalled();
-    }
+    await expect(pending).resolves.toMatchObject({ listenTimedOut: true, listenVerified: false });
   });
 });

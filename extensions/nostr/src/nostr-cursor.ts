@@ -1,15 +1,12 @@
 import type { Event } from "nostr-tools";
+import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
+import { sleepWithAbort } from "openclaw/plugin-sdk/runtime-env";
 
 const CURSOR_WRITE_RETRY_MS = [0, 100, 300] as const;
 const CURSOR_RECOVERY_RETRY_MS = 1_000;
 
 /** Tracks the largest EOSE-safe Nostr timestamp without skipping undurable relay events. */
-export function createNostrDurableCursor(options: {
-  since: number;
-  replayOverlapSec: number;
-  nowSec?: () => number;
-}) {
-  const nowSec = options.nowSec ?? (() => Math.floor(Date.now() / 1000));
+export function createNostrDurableCursor(options: { since: number; replayOverlapSec: number }) {
   let durableCandidate: number | undefined;
   let transientReplayCeiling: number | undefined;
   let backfillComplete = false;
@@ -27,7 +24,8 @@ export function createNostrDurableCursor(options: {
         return undefined;
       }
       const previousSafeCandidate = safeCandidate();
-      durableCandidate = Math.max(durableCandidate ?? 0, Math.min(event.created_at, nowSec()));
+      const nowSec = Math.floor(Date.now() / 1000);
+      durableCandidate = Math.max(durableCandidate ?? 0, Math.min(event.created_at, nowSec));
       const nextSafeCandidate = safeCandidate();
       return backfillComplete && nextSafeCandidate !== previousSafeCandidate
         ? nextSafeCandidate
@@ -62,7 +60,6 @@ export function createNostrCursorStateWriter(options: {
   debounceMs: number;
   write: (cursor: number) => Promise<void>;
   onBackgroundError?: (error: Error) => void;
-  recoveryRetryMs?: number;
 }) {
   let desiredCursor = Math.max(options.minimumCursor, options.initialCursor);
   let dirty = false;
@@ -72,21 +69,16 @@ export function createNostrCursorStateWriter(options: {
   let recoveryFlush: Promise<void> | undefined;
 
   const writeWithRetry = async (cursor: number): Promise<void> => {
-    let lastError: unknown;
-    for (const delayMs of CURSOR_WRITE_RETRY_MS) {
-      if (delayMs > 0) {
-        await new Promise((resolve) => {
-          setTimeout(resolve, delayMs);
-        });
-      }
-      try {
-        await options.write(cursor);
-        return;
-      } catch (error) {
-        lastError = error;
-      }
+    try {
+      await retryAsync(() => options.write(cursor), {
+        attempts: CURSOR_WRITE_RETRY_MS.length,
+        minDelayMs: 0,
+        delayMs: ({ attempt }) => CURSOR_WRITE_RETRY_MS[attempt] ?? 0,
+        sleep: (delayMs) => sleepWithAbort(delayMs),
+      });
+    } catch (error) {
+      throw new Error("Nostr cursor state write failed.", { cause: error });
     }
-    throw new Error("Nostr cursor state write failed.", { cause: lastError });
   };
 
   const enqueueWrite = (cursor: number): Promise<void> => {
@@ -126,13 +118,10 @@ export function createNostrCursorStateWriter(options: {
     if (activeFlush) {
       return activeFlush;
     }
-    const tracked = runFlush().finally(() => {
-      if (activeFlush === tracked) {
-        activeFlush = undefined;
-      }
+    activeFlush = runFlush().finally(() => {
+      activeFlush = undefined;
     });
-    activeFlush = tracked;
-    return tracked;
+    return activeFlush;
   };
 
   const setDesiredCursor = (cursor: number): void => {
@@ -163,9 +152,7 @@ export function createNostrCursorStateWriter(options: {
             return;
           } catch (error) {
             options.onBackgroundError?.(error as Error);
-            await new Promise((resolve) => {
-              setTimeout(resolve, options.recoveryRetryMs ?? CURSOR_RECOVERY_RETRY_MS);
-            });
+            await sleepWithAbort(CURSOR_RECOVERY_RETRY_MS);
           }
         }
       })().finally(() => {

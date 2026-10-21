@@ -1,16 +1,21 @@
-// Agent core contracts define the minimal plugin-facing agent request and response shapes.
 import {
   Agent as CoreAgent,
   type AgentOptions as CoreAgentOptions,
 } from "../../packages/agent-core/src/agent.js";
 import type { AgentCoreRuntimeDeps } from "../../packages/agent-core/src/runtime-deps.js";
 import type { CompleteSimpleFn, StreamFn } from "../../packages/llm-core/src/index.js";
+import { isSqliteTranscriptMutationConflict } from "../config/sessions/session-mutation-conflict-error.js";
+import { runPluginStreamConsumer } from "../plugins/plugin-instance-scope.js";
 import { completeSimple, streamSimple } from "./llm.js";
 
 /** Runtime adapter that lets the package agent-core use OpenClaw LLM helpers. */
 export const openClawAgentCoreRuntime = {
-  completeSimple: completeSimple as unknown as CompleteSimpleFn,
-  streamSimple: streamSimple as unknown as StreamFn,
+  isLocalError: isSqliteTranscriptMutationConflict,
+  runStream: runPluginStreamConsumer,
+  completeSimple: ((model, context, options) =>
+    completeSimple(model, context, options)) satisfies CompleteSimpleFn,
+  streamSimple: ((model, context, options) =>
+    streamSimple(model, context, options)) satisfies StreamFn,
 } satisfies AgentCoreRuntimeDeps;
 
 /** Agent-core class preconfigured with OpenClaw runtime dependencies. */
@@ -20,7 +25,6 @@ export class Agent extends CoreAgent {
   }
 }
 
-// OpenClaw-owned reusable agent core
 export { runAgentLoop } from "../../packages/agent-core/src/index.js";
 // Documented proxy stream API stays until this entrypoint's announced
 // public demotion window (registry: plugin-sdk-agent-core-public-demotion).
@@ -32,6 +36,7 @@ export {
   calculateContextTokens,
   collectEntriesForBranchSummaryFromBranches,
   compact,
+  convertToLlm,
   estimateContextTokens,
   estimateTokens,
   findCutPoint,
@@ -49,6 +54,7 @@ export {
   COMPACTION_SUMMARY_PREFIX,
   COMPACTION_SUMMARY_SUFFIX,
   DEFAULT_COMPACTION_SETTINGS,
+  IMAGE_BLOCK_TOKENS,
 } from "../../packages/agent-core/src/index.js";
 export type {
   AfterToolCallResult,
@@ -70,6 +76,7 @@ export type {
   CompactionPreparation,
   CompactionResult,
   CompactionSettings,
+  CompactionSummaryPrompt,
   ContextUsageEstimate,
   FileOperations,
   Result,
@@ -78,4 +85,3 @@ export type {
   ThinkingLevel,
   ToolExecutionMode,
 } from "../../packages/agent-core/src/index.js";
-// Proxy utilities

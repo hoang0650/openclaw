@@ -1,9 +1,9 @@
 // Tests route-aware LAN advertisement host selection.
-import { describe, expect, it, vi } from "vitest";
-import { resolveAdvertisedLanHost } from "./advertised-lan-host.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolveAdvertisedLanHostCore } from "./advertised-lan-host.js";
 import type { NetworkInterfacesSnapshot } from "./network-interfaces.js";
 
-type ResolveOptions = NonNullable<Parameters<typeof resolveAdvertisedLanHost>[0]>;
+type ResolveOptions = NonNullable<Parameters<typeof resolveAdvertisedLanHostCore>[0]>;
 type RouteRunner = NonNullable<ResolveOptions["runCommandWithTimeout"]>;
 
 function ipv4(address: string, family: "IPv4" | 4 = "IPv4") {
@@ -26,12 +26,13 @@ function createRouteRunner(stdout: string, code = 0): RouteRunner {
 }
 
 describe("advertised LAN host", () => {
+  afterEach(() => vi.restoreAllMocks());
   it("uses the first private IPv4 candidate when route hints are unavailable", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("aix");
     const runner = createRouteRunner("");
 
     await expect(
-      resolveAdvertisedLanHost({
-        platform: "aix",
+      resolveAdvertisedLanHostCore({
         runCommandWithTimeout: runner,
         networkInterfaces: () =>
           ({
@@ -46,21 +47,21 @@ describe("advertised LAN host", () => {
   });
 
   it("uses the lowest-metric Windows default-route alias", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     const runner = createRouteRunner(
       JSON.stringify([
         { InterfaceAlias: "Ethernet", RouteMetric: 1, InterfaceMetric: 1000 },
-        { InterfaceAlias: "Ethernet 2", RouteMetric: 100, InterfaceMetric: 1 },
+        { InterfaceAlias: "réseau-网卡", RouteMetric: 100, InterfaceMetric: 1 },
       ]),
     );
 
     await expect(
-      resolveAdvertisedLanHost({
-        platform: "win32",
+      resolveAdvertisedLanHostCore({
         runCommandWithTimeout: runner,
         networkInterfaces: () =>
           ({
             Ethernet: [ipv4("10.37.129.4")],
-            "Ethernet 2": [ipv4("10.211.55.3")],
+            "réseau-网卡": [ipv4("10.211.55.3")],
           }) as NetworkInterfacesSnapshot,
       }),
     ).resolves.toBe("10.211.55.3");
@@ -71,16 +72,18 @@ describe("advertised LAN host", () => {
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        expect.stringContaining("Get-NetRoute"),
+        expect.stringMatching(
+          /^\[Console\]::OutputEncoding=\[Text\.UTF8Encoding\]::new\(\$false\); Get-NetRoute/,
+        ),
       ],
       { timeoutMs: 3_000, maxOutputBytes: 16 * 1024 },
     );
   });
 
   it("falls back to interface order when Linux route hints do not match", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
     await expect(
-      resolveAdvertisedLanHost({
-        platform: "linux",
+      resolveAdvertisedLanHostCore({
         runCommandWithTimeout: createRouteRunner("default via 100.64.0.1 dev tailscale0 metric 10"),
         networkInterfaces: () =>
           ({
@@ -92,9 +95,9 @@ describe("advertised LAN host", () => {
   });
 
   it("uses the macOS default-route interface", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
     await expect(
-      resolveAdvertisedLanHost({
-        platform: "darwin",
+      resolveAdvertisedLanHostCore({
         runCommandWithTimeout: createRouteRunner("   route to: default\ninterface: en9\n"),
         networkInterfaces: () =>
           ({
@@ -106,9 +109,9 @@ describe("advertised LAN host", () => {
   });
 
   it("uses the first Linux default-route interface", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
     await expect(
-      resolveAdvertisedLanHost({
-        platform: "linux",
+      resolveAdvertisedLanHostCore({
         runCommandWithTimeout: createRouteRunner(
           "default via 192.168.1.1 dev wlan0 proto dhcp metric 600\ndefault via 10.0.0.1 dev eth0 metric 1000",
         ),
@@ -122,6 +125,7 @@ describe("advertised LAN host", () => {
   });
 
   it("fails open to first private IPv4 when route probing times out", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     const runner: RouteRunner = vi.fn(async () => ({
       code: null,
       stdout: "",
@@ -129,8 +133,7 @@ describe("advertised LAN host", () => {
     }));
 
     await expect(
-      resolveAdvertisedLanHost({
-        platform: "win32",
+      resolveAdvertisedLanHostCore({
         runCommandWithTimeout: runner,
         networkInterfaces: () =>
           ({

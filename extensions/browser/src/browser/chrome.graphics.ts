@@ -4,35 +4,32 @@
  * Reads the browser-level SystemInfo domain and caches normalized facts on the
  * exact RunningChrome instance that owns the process.
  */
-import type { SsrFPolicy } from "../infra/net/ssrf.js";
-import { asRecord, isRecord } from "../record-shared.js";
+import type { SsrFPolicy } from "openclaw/plugin-sdk/security-runtime";
+import {
+  asNullableRecord,
+  asFiniteNumber,
+  filterStringEntries,
+  isRecord,
+  normalizeOptionalString,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 import { redactCdpErrorText, withCdpSocket } from "./cdp.helpers.js";
-import { getChromeWebSocketUrl, type RunningChrome } from "./chrome.js";
+import { getChromeWebSocketEndpoint, type RunningChrome } from "./chrome.js";
 import type {
   BrowserGraphicsAcceleration,
   BrowserGraphicsDevice,
   BrowserGraphicsDiagnostics,
-  BrowserVideoDecodeCapability,
-  BrowserVideoEncodeCapability,
 } from "./client.types.js";
 
-type ChromeGraphicsProbeOptions = {
-  httpTimeoutMs?: number;
-  handshakeTimeoutMs?: number;
-  commandTimeoutMs?: number;
-  ssrfPolicy?: SsrFPolicy;
-};
-
-function readString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+function readChromeString(value: unknown): string {
+  return normalizeOptionalString(value) ?? "";
 }
 
-function readNumber(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+function readChromeNumber(value: unknown): number {
+  return asFiniteNumber(value) ?? 0;
 }
 
 function readStringRecord(value: unknown): Record<string, string> {
-  const record = asRecord(value);
+  const record = asNullableRecord(value);
   if (!record) {
     return {};
   }
@@ -42,17 +39,11 @@ function readStringRecord(value: unknown): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
-function readStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
 function readSize(value: unknown): { width: number; height: number } {
-  const size = asRecord(value);
+  const size = asNullableRecord(value);
   return {
-    width: readNumber(size?.width),
-    height: readNumber(size?.height),
+    width: readChromeNumber(size?.width),
+    height: readChromeNumber(size?.height),
   };
 }
 
@@ -60,40 +51,12 @@ function readRecordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
-function readDevices(value: unknown): BrowserGraphicsDevice[] {
-  return readRecordArray(value).map((device) => ({
-    vendorId: readNumber(device.vendorId),
-    deviceId: readNumber(device.deviceId),
-    vendor: readString(device.vendorString),
-    device: readString(device.deviceString),
-    driverVendor: readString(device.driverVendor),
-    driverVersion: readString(device.driverVersion),
-  }));
-}
-
-function readVideoDecoding(value: unknown): BrowserVideoDecodeCapability[] {
-  return readRecordArray(value).map((capability) => ({
-    profile: readString(capability.profile),
-    minResolution: readSize(capability.minResolution),
-    maxResolution: readSize(capability.maxResolution),
-  }));
-}
-
-function readVideoEncoding(value: unknown): BrowserVideoEncodeCapability[] {
-  return readRecordArray(value).map((capability) => ({
-    profile: readString(capability.profile),
-    maxResolution: readSize(capability.maxResolution),
-    maxFramerateNumerator: readNumber(capability.maxFramerateNumerator),
-    maxFramerateDenominator: readNumber(capability.maxFramerateDenominator),
-  }));
-}
-
 function firstAttribute(
   attributes: Record<string, string>,
   names: readonly string[],
 ): string | null {
   for (const name of names) {
-    const value = readString(attributes[name]);
+    const value = readChromeString(attributes[name]);
     if (value) {
       return value;
     }
@@ -131,10 +94,10 @@ function classifyGraphicsAcceleration(params: {
 
 function normalizeChromeGraphicsInfo(
   value: unknown,
-  observedAt = Date.now(),
+  observedAt: number,
 ): BrowserGraphicsDiagnostics {
-  const result = asRecord(value);
-  const gpu = asRecord(result?.gpu);
+  const result = asNullableRecord(value);
+  const gpu = asNullableRecord(result?.gpu);
   if (!gpu) {
     return {
       status: "unavailable",
@@ -145,7 +108,14 @@ function normalizeChromeGraphicsInfo(
 
   const attributes = readStringRecord(gpu.auxAttributes);
   const featureStatus = readStringRecord(gpu.featureStatus);
-  const devices = readDevices(gpu.devices);
+  const devices = readRecordArray(gpu.devices).map((device) => ({
+    vendorId: readChromeNumber(device.vendorId),
+    deviceId: readChromeNumber(device.deviceId),
+    vendor: readChromeString(device.vendorString),
+    device: readChromeString(device.deviceString),
+    driverVendor: readChromeString(device.driverVendor),
+    driverVersion: readChromeString(device.driverVersion),
+  }));
   const renderer = firstAttribute(attributes, ["glRenderer", "angleRenderer", "webglRenderer"]);
   const disabledFeatures = Object.entries(featureStatus)
     .filter(([, status]) => !status.toLowerCase().startsWith("enabled"))
@@ -162,31 +132,45 @@ function normalizeChromeGraphicsInfo(
     devices,
     featureStatus,
     disabledFeatures,
-    driverBugWorkarounds: readStringArray(gpu.driverBugWorkarounds),
-    videoDecoding: readVideoDecoding(gpu.videoDecoding),
-    videoEncoding: readVideoEncoding(gpu.videoEncoding),
+    driverBugWorkarounds: filterStringEntries(gpu.driverBugWorkarounds),
+    videoDecoding: readRecordArray(gpu.videoDecoding).map((capability) => ({
+      profile: readChromeString(capability.profile),
+      minResolution: readSize(capability.minResolution),
+      maxResolution: readSize(capability.maxResolution),
+    })),
+    videoEncoding: readRecordArray(gpu.videoEncoding).map((capability) => ({
+      profile: readChromeString(capability.profile),
+      maxResolution: readSize(capability.maxResolution),
+      maxFramerateNumerator: readChromeNumber(capability.maxFramerateNumerator),
+      maxFramerateDenominator: readChromeNumber(capability.maxFramerateDenominator),
+    })),
   };
 }
 
-export async function inspectChromeGraphicsDiagnostics(
+async function inspectChromeGraphicsDiagnostics(
   cdpUrl: string,
-  options: ChromeGraphicsProbeOptions = {},
+  ssrfPolicy?: SsrFPolicy,
 ): Promise<BrowserGraphicsDiagnostics> {
   const observedAt = Date.now();
   try {
-    const wsUrl = await getChromeWebSocketUrl(cdpUrl, options.httpTimeoutMs, options.ssrfPolicy);
-    if (!wsUrl) {
+    const endpoint = await getChromeWebSocketEndpoint(cdpUrl, 300, ssrfPolicy);
+    if (!endpoint) {
       return {
         status: "unavailable",
         observedAt,
         reason: "browser-level CDP WebSocket was not advertised",
       };
     }
-    const result = await withCdpSocket(wsUrl, async (send) => await send("SystemInfo.getInfo"), {
-      handshakeTimeoutMs: options.handshakeTimeoutMs,
-      commandTimeoutMs: options.commandTimeoutMs,
-      handshakeRetries: 0,
-    });
+    const result = await withCdpSocket(
+      endpoint.url,
+      async (send) => await send("SystemInfo.getInfo"),
+      {
+        handshakeTimeoutMs: 600,
+        commandTimeoutMs: 1_000,
+        handshakeRetries: 0,
+        lookup: endpoint.lookup,
+      },
+    );
     return normalizeChromeGraphicsInfo(result, observedAt);
   } catch (error) {
     return {
@@ -199,12 +183,15 @@ export async function inspectChromeGraphicsDiagnostics(
 
 export async function getCachedChromeGraphicsDiagnostics(
   running: RunningChrome,
-  load: () => Promise<BrowserGraphicsDiagnostics>,
+  ssrfPolicy?: SsrFPolicy,
 ): Promise<BrowserGraphicsDiagnostics> {
   if (running.graphicsDiagnostics) {
     return running.graphicsDiagnostics;
   }
-  running.graphicsDiagnosticsPending ??= load();
+  running.graphicsDiagnosticsPending ??= inspectChromeGraphicsDiagnostics(
+    `http://127.0.0.1:${running.cdpPort}`,
+    ssrfPolicy,
+  );
   try {
     const diagnostics = await running.graphicsDiagnosticsPending;
     if (diagnostics.status === "available") {

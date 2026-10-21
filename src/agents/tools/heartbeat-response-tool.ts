@@ -1,7 +1,5 @@
 /**
- * Heartbeat response tool.
- *
- * Auto-reply heartbeat turns use this tool to record the agent's outcome,
+ * Auto-reply heartbeat turns use this tool to accept the agent's outcome,
  * notification decision, and next-check metadata exactly once per turn.
  */
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
@@ -12,7 +10,9 @@ import {
   HEARTBEAT_TOOL_PRIORITIES,
   normalizeHeartbeatToolResponse,
 } from "../../auto-reply/heartbeat-tool-response.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { assertCronJobScratchContent } from "../../cron/scratch-contract.js";
+import { isHeartbeatEnabledForAgent } from "../../infra/heartbeat-summary.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
 import { optionalStringEnum, stringEnum } from "../schema/string-enum.js";
 import type { AnyAgentTool } from "./common.js";
@@ -29,24 +29,53 @@ const HeartbeatResponseToolSchema = Type.Object(
     nextCheck: Type.Optional(Type.String()),
     scratch: Type.Optional(
       Type.String({
-        description:
-          "Complete replacement for heartbeat monitor prose. Recurring schedules belong in automations, not scratch.",
+        description: "Complete replacement for heartbeat monitor prose; not a recurring schedule.",
       }),
     ),
   },
   { additionalProperties: false },
 );
 
-function readRequiredBoolean(params: Record<string, unknown>, key: string): boolean {
-  const raw = readSnakeCaseParamRaw(params, key);
-  if (typeof raw !== "boolean") {
-    throw new ToolInputError(`${key} required`);
-  }
-  return raw;
+/** Creates the one-shot heartbeat response tool for an auto-reply turn. */
+/**
+ * A heartbeat-enabled agent offers the tool on every turn, so heartbeat turns keep the
+ * session's tool definitions; only a heartbeat run accepts a response.
+ */
+export function resolveHeartbeatTools(
+  options:
+    | {
+        enableHeartbeatTool?: boolean;
+        forceHeartbeatTool?: boolean;
+        trigger?: string;
+        config?: OpenClawConfig;
+      }
+    | undefined,
+  agentId?: string,
+): { enableHeartbeatTool: boolean; offerHeartbeatTool: boolean } {
+  const enableHeartbeatTool =
+    options?.enableHeartbeatTool === true ||
+    (options?.trigger === "heartbeat" &&
+      options?.config?.messages?.visibleReplies === "message_tool");
+  return {
+    enableHeartbeatTool,
+    offerHeartbeatTool:
+      enableHeartbeatTool ||
+      options?.forceHeartbeatTool === true ||
+      (options?.config !== undefined && isHeartbeatEnabledForAgent(options.config, agentId)),
+  };
 }
 
-/** Creates the one-shot heartbeat response recording tool for an auto-reply turn. */
-export function createHeartbeatResponseTool(): AnyAgentTool {
+/** Every turn of a heartbeat-enabled session offers the tool; only a heartbeat run accepts it. */
+export function resolveHeartbeatResponseTool(options?: {
+  enableHeartbeatTool?: boolean;
+  offerHeartbeatTool?: boolean;
+}): AnyAgentTool | null {
+  return options?.enableHeartbeatTool || options?.offerHeartbeatTool
+    ? createHeartbeatResponseTool({ acceptsResponses: options.enableHeartbeatTool === true })
+    : null;
+}
+
+function createHeartbeatResponseTool(options: { acceptsResponses?: boolean } = {}): AnyAgentTool {
   let recorded = false;
   return {
     label: "Heartbeat",
@@ -54,15 +83,23 @@ export function createHeartbeatResponseTool(): AnyAgentTool {
     // Heartbeat prompts instruct the model to call this one-shot tool; hiding
     // it behind tool search would break the heartbeat contract.
     catalogMode: "direct-only",
-    displaySummary: "Record heartbeat outcome/notify choice.",
+    displaySummary: "Accept heartbeat outcome/notify choice.",
     description:
-      "Record heartbeat result. `notify=false` no visible send. `notify=true` needs concise notificationText. Scratch is monitor prose only; manage recurring tasks with cron.",
+      "Accept heartbeat result for post-turn handling. `notify=false` no visible send. `notify=true` needs concise notificationText. Scratch is monitor prose only.",
     parameters: HeartbeatResponseToolSchema,
     execute: async (_toolCallId, args) => {
+      if (options.acceptsResponses === false) {
+        // Offered for tool-list stability; preserve the run's configured reply mode.
+        throw new ToolInputError(
+          "heartbeat_respond is not accepted in this run; follow the configured reply instructions instead",
+        );
+      }
       if (!isRecord(args)) {
         throw new ToolInputError("Heartbeat response arguments required");
       }
-      readRequiredBoolean(args, "notify");
+      if (typeof readSnakeCaseParamRaw(args, "notify") !== "boolean") {
+        throw new ToolInputError("notify required");
+      }
       if (typeof args.scratch === "string") {
         try {
           assertCronJobScratchContent(args.scratch);
@@ -79,12 +116,12 @@ export function createHeartbeatResponseTool(): AnyAgentTool {
       if (recorded) {
         // One heartbeat turn should produce one decision; repeated calls can
         // otherwise overwrite the notify/no-notify choice.
-        throw new ToolInputError("heartbeat_respond already recorded for this turn");
+        throw new ToolInputError("heartbeat_respond already accepted for this turn");
       }
       recorded = true;
       const { scratch, ...publicResponse } = response;
-      const details = { status: "recorded" as const, ...publicResponse } as typeof response & {
-        status: "recorded";
+      const details = { status: "accepted" as const, ...publicResponse } as typeof response & {
+        status: "accepted";
       };
       if (scratch !== undefined) {
         // Keep future prompt content out of model-visible tool output and logs;
@@ -94,7 +131,7 @@ export function createHeartbeatResponseTool(): AnyAgentTool {
       return textResult(
         JSON.stringify(
           {
-            status: "recorded",
+            status: "accepted",
             ...publicResponse,
             ...(scratch !== undefined
               ? {

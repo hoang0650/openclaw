@@ -1,6 +1,14 @@
 // Google tests cover google plugin behavior.
-import { completeSimple, type Model } from "openclaw/plugin-sdk/llm";
-import { resolveFfmpegBin } from "openclaw/plugin-sdk/media-runtime";
+import { toErrorObject as toLintErrorObject } from "openclaw/plugin-sdk/error-runtime";
+import {
+  completeSimple,
+  type Model,
+  type ProviderContext,
+  type ProviderModel,
+  type ProviderStreamFunction,
+  type SimpleStreamOptions,
+} from "openclaw/plugin-sdk/llm";
+import { resolveFfmpegBin } from "openclaw/plugin-sdk/media-ffmpeg";
 import {
   createCapturedPluginRegistration,
   registerProviderPlugin,
@@ -9,9 +17,10 @@ import {
 import { normalizeTranscriptForMatch } from "openclaw/plugin-sdk/provider-test-contracts";
 import type { RealtimeVoiceBridge } from "openclaw/plugin-sdk/realtime-voice";
 import { isLiveTestEnabled } from "openclaw/plugin-sdk/test-live";
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import plugin from "./index.js";
-import { buildGoogleLiveCatalogProvider } from "./provider-catalog.js";
+import { buildGoogleLiveCatalogProvider } from "./provider-catalog-runtime.js";
 import { buildGoogleRealtimeVoiceProvider } from "./realtime-voice-provider.js";
 import { createGeminiWebSearchProvider } from "./src/gemini-web-search-provider.js";
 
@@ -22,6 +31,25 @@ const GOOGLE_API_KEY =
   "";
 const LIVE = isLiveTestEnabled() && GOOGLE_API_KEY.length > 0;
 const describeLive = LIVE ? describe : describe.skip;
+
+// Two 64x64 solid-red H.264 frames keep native-video proof bounded and reproducible.
+const GOOGLE_LIVE_RED_VIDEO_BASE64 = [
+  "AAAAJGZ0eXBpc29tAAACAGlzb21pc282aXNvMmF2YzFtcDQxAAAC5m1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAA",
+  "AAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "AAAAAAAAAAIAAAHodHJhawAAAFx0a2hkAAAAAwAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAA",
+  "AAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAABAAAAAQAAAAAABhG1kaWEAAAAgbWRoZAAAAAAAAAAAAAAAAAAAQAAAAAAA",
+  "VcQAAAAAAC1oZGxyAAAAAAAAAAB2aWRlAAAAAAAAAAAAAAAAVmlkZW9IYW5kbGVyAAAAAS9taW5mAAAAFHZtaGQAAAABAAAA",
+  "AAAAAAAAAAAkZGluZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAADvc3RibAAAAKNzdHNkAAAAAAAAAAEAAACTYXZj",
+  "MQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAABAAEAASAAAAEgAAAAAAAAAARVMYXZjNjIuMjguMTAyIGxpYngyNjQAAAAAAAAA",
+  "AAAAABj//wAAAC1hdmNDAULACv/hABZnQsAK2hCbARAAAAMAEAAAAwAo8SJqAQAEaM4PyAAAABBwYXNwAAAAAQAAAAEAAAAQ",
+  "c3R0cwAAAAAAAAAAAAAAEHN0c2MAAAAAAAAAAAAAABRzdHN6AAAAAAAAAAAAAAAAAAAAEHN0Y28AAAAAAAAAAAAAAChtdmV4",
+  "AAAAIHRyZXgAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGly",
+  "YXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYyLjEyLjEwMgAAAHhtb29mAAAAEG1m",
+  "aGQAAAAAAAAAAQAAAGB0cmFmAAAAJHRmaGQAAAA5AAAAAQAAAAAAAAMKAABAAAAAACMBAQAAAAAAFHRmZHQBAAAAAAAAAAAA",
+  "AAAAAAAgdHJ1bgAAAgUAAAACAAAAgAIAAAAAAAAjAAAACgAAADVtZGF0AAAAH2WIhDoRigACGPHAAED2OAAIeUnJyddddddd",
+  "dddddeAAAAAGQZogF6CMAAAAQ21mcmEAAAArdGZyYQEAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAMKAQEBAAAAEG1m",
+  "cm8AAAAAAAAAQw==",
+].join("");
 
 async function withGoogleApiEnvUnset<T>(fn: () => Promise<T>): Promise<T> {
   const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -114,7 +142,7 @@ function registerGoogleRealtimeVoiceProvider() {
 }
 
 describeLive("google plugin live", () => {
-  it.each(["gemini-3.6-flash", "gemini-3.5-flash-lite"])(
+  it.each(["gemini-4-argon", "gemini-3.8-flash", "gemini-3.5-flash-lite"])(
     "discovers and completes through %s",
     async (modelId) => {
       const provider = await buildGoogleLiveCatalogProvider({
@@ -150,6 +178,162 @@ describeLive("google plugin live", () => {
     },
     90_000,
   );
+
+  it("completes a Gemini 4 tool-call round trip with unsigned replay through the registered transport", async () => {
+    const catalog = await buildGoogleLiveCatalogProvider({
+      apiKey: "GEMINI_API_KEY",
+      discoveryApiKey: GOOGLE_API_KEY,
+    });
+    const definition = catalog.models.find((model) => model.id === "gemini-4-argon");
+    expect(definition, "gemini-4-argon missing from Google models.list").toBeDefined();
+    const model = {
+      ...definition!,
+      provider: "google",
+      baseUrl: catalog.baseUrl,
+      api: "google-generative-ai",
+    } as ProviderModel<"google-generative-ai">;
+    const { providers } = await registerGooglePlugin();
+    const provider = requireRegisteredProvider(providers, "google");
+    const streamFn = provider.createStreamFn?.({
+      provider: "google",
+      modelId: model.id,
+      model: model as never,
+    }) as
+      | ProviderStreamFunction<
+          "google-generative-ai",
+          SimpleStreamOptions & { toolChoice: "required" | "none" }
+        >
+      | undefined;
+    if (!streamFn) {
+      throw new Error("registered Google provider did not create its chat transport");
+    }
+    const tool = {
+      name: "live_echo",
+      description: "Return the supplied value.",
+      parameters: Type.Object({ value: Type.String() }, { additionalProperties: false }),
+    };
+    const userPrompt = {
+      role: "user" as const,
+      content: "Call live_echo with value argon. Do not answer directly.",
+      timestamp: Date.now(),
+    };
+    const first = await streamFn(
+      model,
+      { messages: [userPrompt], tools: [tool] },
+      { apiKey: GOOGLE_API_KEY, reasoning: "low", maxTokens: 2048, toolChoice: "required" },
+    ).result();
+    expect(first.stopReason, first.errorMessage).toBe("toolUse");
+    const call = first.content.find((block) => block.type === "toolCall");
+    if (!call || call.type !== "toolCall") {
+      throw new Error("Gemini 4 did not return the requested tool call");
+    }
+    expect(call.name).toBe("live_echo");
+    expect(call.arguments).toEqual({ value: "argon" });
+    expect(call.thoughtSignature).toBeTruthy();
+
+    // Cross-model/transcript history lacks Google's signature; the transport must repair it.
+    const unsignedCall = {
+      type: "toolCall" as const,
+      id: call.id,
+      name: call.name,
+      arguments: call.arguments,
+    };
+    const second = await streamFn(
+      model,
+      {
+        messages: [
+          userPrompt,
+          { ...first, content: [unsignedCall] },
+          {
+            role: "toolResult",
+            toolCallId: call.id,
+            toolName: call.name,
+            content: [{ type: "text", text: "argon" }],
+            isError: false,
+            timestamp: Date.now(),
+          },
+          { role: "user", content: "Reply with exactly: argon", timestamp: Date.now() },
+        ],
+        tools: [tool],
+      },
+      { apiKey: GOOGLE_API_KEY, reasoning: "low", maxTokens: 2048, toolChoice: "none" },
+    ).result();
+    expect(second.stopReason, second.errorMessage).toBe("stop");
+    const answer = second.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join(" ")
+      .trim();
+    expect(answer).toMatch(/^argon[.!]?$/iu);
+  }, 180_000);
+
+  it("understands native video through the registered Google chat transport", async () => {
+    const catalog = await buildGoogleLiveCatalogProvider({
+      apiKey: "GEMINI_API_KEY",
+      discoveryApiKey: GOOGLE_API_KEY,
+    });
+    const definition = catalog.models.find((candidate) => candidate.id === "gemini-3.5-flash-lite");
+    expect(definition, "gemini-3.5-flash-lite missing from Google models.list").toBeDefined();
+    expect(definition?.input).toContain("video");
+
+    const catalogModel = {
+      ...definition!,
+      provider: "google",
+      baseUrl: catalog.baseUrl,
+      api: "google-generative-ai",
+    } as ProviderModel<"google-generative-ai">;
+    const { providers } = await registerGooglePlugin();
+    const provider = requireRegisteredProvider(providers, "google");
+    const model = provider.normalizeResolvedModel?.({
+      provider: "google",
+      modelId: catalogModel.id,
+      model: catalogModel,
+    } as never) as ProviderModel<"google-generative-ai"> | undefined;
+    expect(model?.input).toContain("video");
+    if (!model) {
+      throw new Error("registered Google provider did not prepare its native video model");
+    }
+
+    const registeredStream = provider.createStreamFn?.({
+      provider: "google",
+      modelId: model.id,
+      model: model as never,
+    });
+    const streamFn = registeredStream as ProviderStreamFunction<"google-generative-ai"> | undefined;
+    if (!streamFn) {
+      throw new Error("registered Google provider did not create its native chat transport");
+    }
+    const context: ProviderContext = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "What single color fills this video? Reply with exactly RED, BLUE, or GREEN.",
+            },
+            {
+              type: "video",
+              mimeType: "video/mp4",
+              data: GOOGLE_LIVE_RED_VIDEO_BASE64,
+            },
+          ],
+          timestamp: Date.now(),
+        },
+      ],
+    };
+
+    const stream = await Promise.resolve(
+      streamFn(model, context, { apiKey: GOOGLE_API_KEY, maxTokens: 16 }),
+    );
+    const response = await stream.result();
+    expect(response.stopReason, response.errorMessage).not.toBe("error");
+    const answer = response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join(" ");
+    expect(answer).toMatch(/\bRED\b/iu);
+  }, 90_000);
 
   it("synthesizes speech through the registered provider", async () => {
     const { speechProviders } = await registerGooglePlugin();
@@ -289,7 +473,7 @@ describeLive("google plugin live", () => {
       expect(assistantPartialCount).toBeGreaterThan(0);
       expect(errors).toStrictEqual([]);
     } finally {
-      bridge.close();
+      await bridge.close();
     }
 
     await waitForGoogleLive(
@@ -367,8 +551,8 @@ describeLive("google plugin live", () => {
       expect(assistantPartialCount).toBeGreaterThan(0);
       expect(errors).toStrictEqual([]);
     } finally {
-      bridge.close();
-      bridge.close();
+      await bridge.close();
+      await bridge.close();
     }
 
     await waitForGoogleLive(
@@ -390,36 +574,50 @@ describeLive("google plugin live", () => {
     expect(closeReasons).toEqual(["completed"]);
   }, 120_000);
 
-  it("runs Gemini web search through the registered provider tool", async () => {
-    const provider = createGeminiWebSearchProvider();
-    const tool = provider.createTool?.({
-      config: {},
-      searchConfig: { gemini: { apiKey: GOOGLE_API_KEY }, cacheTtlMinutes: 0, timeoutSeconds: 90 },
-    } as never);
+  it.each([undefined, "gemini-3.5-flash"])(
+    "runs Gemini web search with model %j",
+    async (model) => {
+      const provider = createGeminiWebSearchProvider();
+      const tool = provider.createTool?.({
+        config: {
+          plugins: {
+            entries: {
+              google: { config: { webSearch: { apiKey: GOOGLE_API_KEY, model } } },
+            },
+          },
+        },
+        searchConfig: { provider: "gemini", cacheTtlMinutes: 0, timeoutSeconds: 90 },
+      } as never);
 
-    let result: { provider?: string; content?: unknown; citations?: unknown } | undefined;
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        result = await tool?.execute({ query: "OpenClaw GitHub", count: 1 });
-        lastError = undefined;
-        break;
-      } catch (error) {
-        lastError = error;
-        if (!isTransientGeminiSearchError(error) || attempt === 1) {
-          throw error;
+      let result:
+        | { provider?: string; model?: string; content?: unknown; citations?: unknown }
+        | undefined;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          result = await tool?.execute({ query: "OpenClaw GitHub", count: 1 });
+          lastError = undefined;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (!isTransientGeminiSearchError(error) || attempt === 1) {
+            throw error;
+          }
         }
       }
-    }
-    if (lastError) {
-      throw toLintErrorObject(lastError, "Non-Error thrown");
-    }
+      if (lastError) {
+        throw toLintErrorObject(lastError, "Non-Error thrown");
+      }
 
-    expect(result?.provider).toBe("gemini");
-    expect(typeof result?.content).toBe("string");
-    expect((result!.content as string).length).toBeGreaterThan(20);
-    expect(Array.isArray(result?.citations)).toBe(true);
-  }, 120_000);
+      expect(result?.provider).toBe("gemini");
+      expect(result?.model).toBe(model ?? "gemini-3.6-flash");
+      expect(typeof result?.content).toBe("string");
+      expect((result!.content as string).length).toBeGreaterThan(20);
+      expect(Array.isArray(result?.citations)).toBe(true);
+      expect((result!.citations as unknown[]).length).toBeGreaterThan(0);
+    },
+    120_000,
+  );
 
   it("runs Gemini web search through the Google model provider config fallback", async () => {
     await withGoogleApiEnvUnset(async () => {
@@ -442,6 +640,7 @@ describeLive("google plugin live", () => {
       expect(process.env.GEMINI_API_KEY).toBeUndefined();
       expect(process.env.GOOGLE_API_KEY).toBeUndefined();
       expect(result?.provider).toBe("gemini");
+      expect(result?.model).toBe("gemini-3.6-flash");
       expect(typeof result?.content).toBe("string");
       expect((result!.content as string).length).toBeGreaterThan(20);
       expect(Array.isArray(result?.citations)).toBe(true);
@@ -449,17 +648,3 @@ describeLive("google plugin live", () => {
     });
   }, 120_000);
 });
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
-}

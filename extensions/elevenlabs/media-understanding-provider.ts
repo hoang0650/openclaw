@@ -1,4 +1,3 @@
-// Elevenlabs provider module implements model/runtime integration.
 import type {
   AudioTranscriptionRequest,
   AudioTranscriptionResult,
@@ -16,7 +15,7 @@ import { DEFAULT_ELEVENLABS_BASE_URL, normalizeElevenLabsBaseUrl } from "./share
 
 const DEFAULT_ELEVENLABS_STT_MODEL = "scribe_v2";
 
-export async function transcribeElevenLabsAudio(
+async function transcribeElevenLabsAudio(
   req: AudioTranscriptionRequest,
 ): Promise<AudioTranscriptionResult> {
   const fetchFn = req.fetchFn ?? fetch;
@@ -69,7 +68,7 @@ export async function transcribeElevenLabsAudio(
       "ElevenLabs audio transcription failed",
     );
     const text = requireTranscriptionText(
-      typeof payload.text === "string" ? payload.text : undefined,
+      payload.text,
       "ElevenLabs audio transcription response missing text",
     );
     return { text, model };

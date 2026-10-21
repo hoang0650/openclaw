@@ -76,7 +76,6 @@ function pruneExpiredExecApprovalFollowupRuntimeHandoffs(nowMs: number): void {
   }
 }
 
-/** Build the idempotency key used for an exec approval follow-up. */
 export function buildExecApprovalFollowupIdempotencyKey(params: {
   approvalId: string;
   nonce?: string;
@@ -86,7 +85,6 @@ export function buildExecApprovalFollowupIdempotencyKey(params: {
   return nonce ? `${base}${EXEC_APPROVAL_FOLLOWUP_IDEMPOTENCY_NONCE_MARKER}${nonce}` : base;
 }
 
-/** Parse the approval id embedded in a follow-up idempotency key. */
 export function parseExecApprovalFollowupApprovalId(idempotencyKey: string): string | undefined {
   const normalized = normalizeOptionalString(idempotencyKey);
   if (!normalized?.startsWith(EXEC_APPROVAL_FOLLOWUP_IDEMPOTENCY_PREFIX)) {
@@ -160,10 +158,6 @@ export function claimExecApprovalFollowupRuntimeHandoff(params: {
   if (!entry) {
     return undefined;
   }
-  if (!isFutureDateTimestampMs(entry.expiresAtMs, { nowMs })) {
-    execApprovalFollowupRuntimeHandoffs.delete(handoffId);
-    return undefined;
-  }
   const sessionKey = normalizeOptionalString(params.sessionKey);
   if (
     entry.approvalId !== approvalId ||
@@ -181,10 +175,11 @@ export function claimExecApprovalFollowupRuntimeHandoff(params: {
   return cloneExecApprovalFollowupRuntimeHandoff(entry);
 }
 
-/** Finalize a claimed handoff once its run has been dispatched. */
+/** Consume a claimed handoff at its final privileged use. */
 export function finalizeExecApprovalFollowupRuntimeHandoff(params: {
   handoffId?: string;
   claimId?: string;
+  nowMs?: number;
 }): boolean {
   const handoffId = normalizeOptionalString(params.handoffId);
   const claimId = normalizeOptionalString(params.claimId);
@@ -192,6 +187,11 @@ export function finalizeExecApprovalFollowupRuntimeHandoff(params: {
     return false;
   }
   const entry = execApprovalFollowupRuntimeHandoffs.get(handoffId);
+  const nowMs = params.nowMs ?? Date.now();
+  if (entry && !isFutureDateTimestampMs(entry.expiresAtMs, { nowMs })) {
+    execApprovalFollowupRuntimeHandoffs.delete(handoffId);
+    return false;
+  }
   if (entry?.claimId !== claimId) {
     return false;
   }
