@@ -95,6 +95,17 @@ export function resolvePairingHint(
   return null;
 }
 
+function gatewaySecretMessageHint(message: string): "required" | "failed" | null {
+  const lower = normalizeLowercaseStringOrEmpty(message);
+  if (lower.includes("gateway token missing") || lower.includes("gateway password missing")) {
+    return "required";
+  }
+  if (lower.includes("gateway token mismatch") || lower.includes("gateway password mismatch")) {
+    return "failed";
+  }
+  return null;
+}
+
 /**
  * Keep fallback string matching narrow so generic "connect failed" close reasons
  * do not get misclassified as token/password problems.
@@ -120,7 +131,9 @@ export function resolveAuthHintKind(params: {
       return "trusted-proxy";
     }
     if (!AUTH_FAILURE_CODES.has(params.lastErrorCode)) {
-      return null;
+      // The handshake frame code is often INVALID_REQUEST while the message
+      // still says the gateway token is missing or wrong. That is not a dead socket.
+      return gatewaySecretMessageHint(params.lastError);
     }
     // A remembered device token the Gateway no longer knows is not an operator-supplied
     // secret; without a typed token or password the Gateway is asking for its token,
@@ -134,6 +147,10 @@ export function resolveAuthHintKind(params: {
       : "failed";
   }
 
+  const secretHint = gatewaySecretMessageHint(params.lastError);
+  if (secretHint) {
+    return secretHint;
+  }
   const lower = normalizeLowercaseStringOrEmpty(params.lastError);
   if (!lower.includes("unauthorized")) {
     return null;

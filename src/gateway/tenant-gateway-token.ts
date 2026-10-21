@@ -20,22 +20,67 @@ export function tenantGatewayMasterSecret(env: NodeJS.ProcessEnv = process.env):
   );
 }
 
-/** Buyer or hotel id from the public host. Port and a proxy chain are ignored. */
-export function tenantIdFromHost(host: string | undefined): string | undefined {
-  const hostname = String(host ?? "")
-    .split(",")[0]
-    ?.trim()
-    .toLowerCase()
-    .replace(/:\d+$/, "");
-  if (!hostname) {
-    return undefined;
-  }
+function tenantIdFromHostname(hostname: string): string | undefined {
   const phhotel = /^([a-f0-9]{24})\.phhotel\.vn$/i.exec(hostname);
   if (phhotel?.[1]) {
     return phhotel[1].toLowerCase();
   }
   const aimarkets = /^([a-f0-9]{24})\.openclaw\.aimarkets\.vn$/i.exec(hostname);
   return aimarkets?.[1]?.toLowerCase();
+}
+
+/**
+ * Buyer or hotel id from the public host. Port is ignored. A proxy chain is
+ * scanned so an internal first hop does not hide `{id}.openclaw.aimarkets.vn`.
+ */
+export function tenantIdFromHost(host: string | undefined): string | undefined {
+  for (const label of String(host ?? "").split(",")) {
+    const hostname = label.trim().toLowerCase().replace(/:\d+$/, "");
+    const tenantId = hostname ? tenantIdFromHostname(hostname) : undefined;
+    if (tenantId) {
+      return tenantId;
+    }
+  }
+  return undefined;
+}
+
+/** Public tenant hostname from a Host or X-Forwarded-Host chain, if any. */
+export function tenantHostnameFromHeader(host: string | undefined): string | undefined {
+  for (const label of String(host ?? "").split(",")) {
+    const hostname = label.trim().toLowerCase().replace(/:\d+$/, "");
+    if (hostname && tenantIdFromHostname(hostname)) {
+      return hostname;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Control UI opened on its own tenant host. The browser Origin matches the
+ * public host, so a missing or stale pasted gateway token must not block it.
+ */
+export function allowsTenantSameOriginControlUi(params: {
+  isControlUi: boolean;
+  role: string;
+  requestHost?: string;
+  requestOrigin?: string;
+}): boolean {
+  if (!params.isControlUi || params.role !== "operator") {
+    return false;
+  }
+  const hostId = tenantIdFromHost(params.requestHost);
+  if (!hostId) {
+    return false;
+  }
+  const origin = String(params.requestOrigin ?? "").trim();
+  if (!origin) {
+    return false;
+  }
+  try {
+    return tenantIdFromHost(new URL(origin).hostname) === hostId;
+  } catch {
+    return false;
+  }
 }
 
 export function tenantGatewayToken(

@@ -30,7 +30,7 @@ import { serializeGatewayFrame } from "../serialized-json.js";
 import { MAX_BUFFERED_BYTES, WEBSOCKET_OPEN_READY_STATE } from "../server-constants.js";
 import type { GatewayRequestContext } from "../server-methods/types.js";
 import { cleanupTalkConnection } from "../talk/session-registry.js";
-import { tenantIdFromHost } from "../tenant-gateway-token.js";
+import { tenantHostnameFromHeader } from "../tenant-gateway-token.js";
 import type { WebSocketHeartbeatDiagnostics } from "../websocket-keepalive.js";
 import { formatForLog, logWs } from "../ws-log.js";
 import { refreshClientPresence } from "./client-presence.js";
@@ -153,10 +153,13 @@ export function attachGatewayConnection(params: AttachGatewayConnectionParams) {
   const [openedAt, connId] = [Date.now(), randomUUID()];
   const connectionController = new AbortController();
   const { remoteAddr, remotePort, localAddr, localPort, endpoint } = params.addresses;
-  const forwardedHost = getHeader(upgradeReq, "x-forwarded-host")?.split(",")[0]?.trim();
-  const requestHost = tenantIdFromHost(forwardedHost)
-    ? forwardedHost
-    : getHeader(upgradeReq, "host");
+  const forwardedHost = getHeader(upgradeReq, "x-forwarded-host");
+  const hostHeader = getHeader(upgradeReq, "host");
+  const requestHost =
+    tenantHostnameFromHeader(forwardedHost) ??
+    tenantHostnameFromHeader(hostHeader) ??
+    forwardedHost?.split(",")[0]?.trim() ??
+    hostHeader;
   const requestOrigin = getHeader(upgradeReq, "origin");
   const requestUserAgent = getHeader(upgradeReq, "user-agent");
   const forwardedFor = getHeader(upgradeReq, "x-forwarded-for");

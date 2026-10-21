@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { tenantGatewayToken, tenantIdFromHost } from "./tenant-gateway-token.js";
+import {
+  allowsTenantSameOriginControlUi,
+  tenantGatewayToken,
+  tenantHostnameFromHeader,
+  tenantIdFromHost,
+} from "./tenant-gateway-token.js";
 
 describe("tenant gateway token", () => {
   it("matches PHGroup-AI HMAC-SHA256 base64url", () => {
@@ -22,5 +27,41 @@ describe("tenant gateway token", () => {
       tenantGatewayToken("0123456789abcdef01234567", env),
     );
     expect(tenantIdFromHost("openclaw.aimarkets.vn")).toBeUndefined();
+    expect(
+      tenantIdFromHost("gateway.internal, 6a69f0cdd7faa829b87a852e.openclaw.aimarkets.vn:443"),
+    ).toBe(hotel);
+    expect(
+      tenantHostnameFromHeader(
+        "gateway.internal:8080, 6a69f0cdd7faa829b87a852e.openclaw.aimarkets.vn",
+      ),
+    ).toBe("6a69f0cdd7faa829b87a852e.openclaw.aimarkets.vn");
+  });
+
+  it("allows the Control UI only on its own tenant origin", () => {
+    const host = "6a69f0cdd7faa829b87a852e.openclaw.aimarkets.vn";
+    expect(
+      allowsTenantSameOriginControlUi({
+        isControlUi: true,
+        role: "operator",
+        requestHost: `gateway.internal, ${host}`,
+        requestOrigin: `https://${host}`,
+      }),
+    ).toBe(true);
+    expect(
+      allowsTenantSameOriginControlUi({
+        isControlUi: true,
+        role: "operator",
+        requestHost: host,
+        requestOrigin: "https://evil.example",
+      }),
+    ).toBe(false);
+    expect(
+      allowsTenantSameOriginControlUi({
+        isControlUi: false,
+        role: "operator",
+        requestHost: host,
+        requestOrigin: `https://${host}`,
+      }),
+    ).toBe(false);
   });
 });

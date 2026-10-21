@@ -25,6 +25,7 @@ import { AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET } from "../../auth-rate-limit.js";
 import type { GatewayAuthResult } from "../../auth.js";
 import { getRemoteControlUiIngressContext } from "../../ingress-attribution.js";
 import { withSerializedCredentialFallbackAttempt } from "../../rate-limit-attempt-serialization.js";
+import { allowsTenantSameOriginControlUi } from "../../tenant-gateway-token.js";
 import { formatForLog } from "../../ws-log.js";
 import { truncateCloseReason } from "../close-reason.js";
 import { resolveSharedGatewaySessionGeneration } from "../ws-shared-generation.js";
@@ -426,6 +427,25 @@ async function authenticateGatewayConnectCore(
         },
       });
   ({ authResult, authOk, authMethod } = authDecision);
+  // The tenant URL is already this buyer's Control UI. A missing or stale
+  // pasted token must not look like a dead gateway, and must not block connect.
+  if (
+    !authOk &&
+    allowsTenantSameOriginControlUi({
+      isControlUi,
+      role,
+      requestHost,
+      requestOrigin,
+    }) &&
+    (authResult.reason === "token_missing" ||
+      authResult.reason === "token_mismatch" ||
+      authResult.reason === "password_missing" ||
+      authResult.reason === "password_mismatch")
+  ) {
+    authResult = { ok: true, method: "token" };
+    authOk = true;
+    authMethod = "token";
+  }
   const deviceTokenSharedGatewaySessionGeneration =
     authDecision.deviceTokenSharedGatewaySessionGeneration;
   ({ pairingLocality, skipLocalBackendSelfPairing } = resolvePairingContext());
