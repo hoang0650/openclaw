@@ -20,6 +20,7 @@ import type {
   GatewayWsBrowserOrigin,
   RemoteControlUiIngressContext,
 } from "./server/client-identity-types.js";
+import { tenantIdFromHost } from "./tenant-gateway-token.js";
 
 export function checkGatewayWsBrowserOrigin(origin: GatewayWsBrowserOrigin, cfg: OpenClawConfig) {
   return checkBrowserOrigin({
@@ -51,9 +52,11 @@ export function resolveBrowserOriginPolicy(params: {
   req: IncomingMessage;
   cfg?: OpenClawConfig;
 }): BrowserOriginPolicy {
+  const forwardedHost = getHeader(params.req, "x-forwarded-host")?.split(",")[0]?.trim();
+  const host = getHeader(params.req, "host");
   return {
     remoteControlUiIngress: getRemoteControlUiIngressContext(params.req),
-    requestHost: getHeader(params.req, "host"),
+    requestHost: tenantIdFromHost(forwardedHost) ? forwardedHost : host,
     origin: getHeader(params.req, "origin"),
     fetchSite: getHeader(params.req, "sec-fetch-site"),
     allowedOrigins: resolveControlUiAllowedOrigins(params.cfg),
@@ -145,6 +148,9 @@ export function checkBrowserOrigin(params: {
   }
 
   const requestHost = normalizeHostHeader(params.requestHost);
+  if (requestHost && parsedOrigin.host === requestHost && tenantIdFromHost(requestHost)) {
+    return { ok: true, matchedBy: "host-header-fallback" };
+  }
   if (
     params.allowHostHeaderOriginFallback === true &&
     requestHost &&

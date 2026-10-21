@@ -30,6 +30,7 @@ import {
 } from "./net.js";
 import { checkBrowserOrigin, type BrowserOriginPolicy } from "./origin-check.js";
 import { withSerializedRateLimitAttempt } from "./rate-limit-attempt-serialization.js";
+import { tenantGatewayToken, tenantIdFromHost } from "./tenant-gateway-token.js";
 export { resolveGatewayAuth, type ResolvedGatewayAuth } from "./auth-resolve.js";
 const LEGACY_OPENCLAW_ENV_NOTE =
   " Legacy CLAWDBOT_* and MOLTBOT_* environment variables are ignored; use OPENCLAW_* names.";
@@ -524,13 +525,19 @@ async function authorizeGatewayConnectCore(
   }
 
   if (auth.mode === "token" || auth.mode === "password") {
-    // One gateway serves PHHotel and AI Markets: AI Markets hosts also accept
-    // the token derived from the AI Markets secrets.
-    const aimarketsToken =
-      auth.mode === "token" && req && isAimarketsHost(getHeader(req, "host"))
-        ? resolveAimarketsGatewayToken()
-        : "";
+    const publicHost = req
+      ? (getHeader(req, "x-forwarded-host") ?? getHeader(req, "host"))
+      : undefined;
+    const tenantToken = tenantGatewayToken(tenantIdFromHost(publicHost));
     const providedToken = resolveConnectSecret("token", connectAuth);
+    if (tenantToken && providedToken && safeEqualSecret(providedToken, tenantToken)) {
+      limiter?.reset(subject, rateLimitScope);
+      return { ok: true, method: "token" };
+    }
+    // One gateway serves PHHotel and AI Markets: AI Markets hosts also accept
+    // the older shared token derived from the AI Markets secrets.
+    const aimarketsToken =
+      auth.mode === "token" && isAimarketsHost(publicHost) ? resolveAimarketsGatewayToken() : "";
     if (aimarketsToken && providedToken && safeEqualSecret(providedToken, aimarketsToken)) {
       limiter?.reset(subject, rateLimitScope);
       return { ok: true, method: "token" };
