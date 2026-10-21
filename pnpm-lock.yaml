@@ -703,6 +703,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/aimarkets-usage:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   extensions/alibaba:
     devDependencies:
       '@openclaw/plugin-sdk':
@@ -2061,6 +2067,12 @@ importers:
         version: link:../../packages/plugin-sdk
 
   extensions/perplexity:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/phhotel-usage:
     devDependencies:
       '@openclaw/plugin-sdk':
         specifier: workspace:*
