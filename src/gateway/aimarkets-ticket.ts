@@ -277,7 +277,9 @@ export function checkAimarketsBuyerMethodAccess(params: {
   clientUserId: string | undefined;
   internal?: boolean;
 }): string | null {
-  if (params.internal || !params.clientUserId) return null;
+  // Browser connections also carry server-attested `internal` transport metadata.
+  // A verified buyer identity remains buyer authority regardless of that metadata.
+  if (!params.clientUserId) return null;
   if (
     AIMARKETS_BUYER_DISCOVERY_METHODS.has(params.method) ||
     AIMARKETS_BUYER_SESSION_METHODS.has(params.method)

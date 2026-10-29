@@ -476,8 +476,8 @@ export async function authorizeGatewayRequestPreDispatch(params: {
     // Missing run targets must not select the operator's global/default session.
     if (
       params.client &&
-      !params.client.internal &&
-      (params.client.aimarketsUserId || isAimarketsTicketEnforced())
+      (params.client.aimarketsUserId ||
+        (!params.client.internal && isAimarketsTicketEnforced()))
     ) {
       const targets = [
         ...resolveDirectSessionTargets(params.method, requestParams),

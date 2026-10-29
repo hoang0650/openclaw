@@ -6,6 +6,15 @@ import {
 } from "./server-methods.authorization.test-support.js";
 import type { GatewayRequestHandler, GatewayRequestContext } from "./server-methods/types.js";
 const buyer = "b".repeat(24);
+// Real browser handshakes attach this metadata too. It is not internal-only
+// authority and must never suppress a verified buyer's method/session boundary.
+const browserInternal = {
+  authenticatedOperator: true as const,
+  authenticatedControlUi: true as const,
+  controlUiAdmin: true as const,
+  isLocalClient: true as const,
+  operatorRoleActor: { kind: "system" as const },
+};
 afterEach(() => vi.unstubAllEnvs());
 it.each([
   ["foreign suffix", { sessionKey: `agent:main:market-${"a".repeat(24)}f`, message: "test" }],
@@ -16,7 +25,7 @@ it.each([
   await withOpenClawTestState({ scenario: "minimal" }, async () => {
     const handler = vi.fn<GatewayRequestHandler>(({ respond }) => respond(true, { allowed: true }));
     const respond = await dispatchAuthorizationRequest("agent", params, {
-      client: authorizationClient("buyer", ["operator.admin"], { aimarketsUserId: buyer }),
+      client: authorizationClient("buyer", ["operator.admin"], { aimarketsUserId: buyer, internal: browserInternal }),
       context: {
         getRuntimeConfig: () => ({}),
         logGateway: { warn: vi.fn() },
@@ -50,7 +59,7 @@ it.each([
       method,
       { sessionKey: `agent:main:market-${buyer}` },
       {
-        client: authorizationClient("buyer", ["operator.admin"], { aimarketsUserId: buyer }),
+        client: authorizationClient("buyer", ["operator.admin"], { aimarketsUserId: buyer, internal: browserInternal }),
         context: {
           getRuntimeConfig: () => ({}),
           logGateway: { warn: vi.fn() },
