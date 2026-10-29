@@ -193,10 +193,12 @@ RUN if grep -qx 'qa-lab' /tmp/openclaw-selected-plugin-dirs; then \
 # while the disposable build stage still has the full test dependencies.
 RUN OPENCLAW_VITEST_RUNTIME=node node scripts/run-vitest.mjs \
       --config test/vitest/vitest.gateway-core.config.ts run \
-      src/gateway/server-methods.aimarkets-byok.test.ts \
       src/gateway/aimarkets-ticket.test.ts --maxWorkers=1 --passWithNoTests=false
 RUN OPENCLAW_VITEST_RUNTIME=node node scripts/run-vitest.mjs \
-      --config test/vitest/vitest.agents-embedded-agent.config.ts run \
+      --config test/vitest/vitest.gateway-database-workers.config.ts run \
+      src/gateway/server-methods.aimarkets-byok.test.ts --maxWorkers=1 --passWithNoTests=false
+RUN OPENCLAW_VITEST_RUNTIME=node node scripts/run-vitest.mjs \
+      --config test/vitest/vitest.infra.config.ts run \
       src/agents/embedded-agent-runner/run/auth-controller.test.ts \
       -t "never reads platform auth after a buyer resolver rejects" \
       --maxWorkers=1 --passWithNoTests=false
