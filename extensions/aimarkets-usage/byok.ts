@@ -80,7 +80,8 @@ async function fetchKeys(params: {
     if (!res.ok) {
       throw new Error(`BYOK key store responded HTTP ${res.status}`);
     }
-    const data = (await res.json().catch(() => ({}))) as { keys?: unknown };
+    const data = (await res.json().catch(() => ({}))) as { userId?: string; keys?: unknown };
+    if (data.userId !== params.userId) throw new Error('BYOK owner mismatch');
     return sanitizeKeys(data.keys);
   } finally {
     clearTimeout(timer);
@@ -103,6 +104,8 @@ export async function getUserKeys(params: {
   if (pending) return pending;
   const request = fetchKeys({ ...params, userId })
     .then((keys) => {
+      for (const [id, item] of cache) if (Date.now() - item.at >= CACHE_TTL_MS) cache.delete(id);
+      if (cache.size >= 500) cache.delete(cache.keys().next().value!);
       cache.set(userId, { at: Date.now(), keys });
       return keys;
     })
