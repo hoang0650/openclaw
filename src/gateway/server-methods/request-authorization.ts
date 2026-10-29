@@ -26,7 +26,12 @@ import {
   listAgentDatabaseAdmissionRefusals,
   readAgentDatabaseAdmissionRefusal,
 } from "../../state/agent-database-admission.js";
-import { checkAimarketsSessionAccess, isAimarketsTicketEnforced } from "../aimarkets-ticket.js";
+import {
+  aimarketsBuyerMethodRequiresSession,
+  checkAimarketsBuyerMethodAccess,
+  checkAimarketsSessionAccess,
+  isAimarketsTicketEnforced,
+} from "../aimarkets-ticket.js";
 import { readChatInputRecoveryAdmission } from "../chat-input-recovery-source.js";
 import type { ExpectedProfileBinding } from "../expected-profile.js";
 import type { GatewayMethodRegistryView } from "../methods/descriptor.js";
@@ -212,6 +217,18 @@ export async function authorizeGatewayRequestPreDispatch(params: {
     : undefined;
   let startupReadSignal: AbortSignal | undefined;
   let startupReadDeadline: number | undefined;
+  const buyerMethodError = checkAimarketsBuyerMethodAccess({
+    method: params.method,
+    clientUserId: params.client?.aimarketsUserId,
+    internal: Boolean(params.client?.internal),
+  });
+  if (buyerMethodError) {
+    return {
+      error: errorShape(ErrorCodes.FORBIDDEN, buyerMethodError, {
+        details: { code: "AIMARKETS_METHOD_FORBIDDEN" },
+      }),
+    };
+  }
   let startupReadResult: { cfg: OpenClawConfig; agents?: string[]; timedOut: boolean } | undefined;
   signal?.throwIfAborted();
   if (params.context.ensureSessionRowProjection) {
@@ -457,7 +474,11 @@ export async function authorizeGatewayRequestPreDispatch(params: {
     }
     // The target owner, not a user-chosen name alone, decides buyer credential scope.
     // Missing run targets must not select the operator's global/default session.
-    if (params.client && !params.client.internal && isAimarketsTicketEnforced()) {
+    if (
+      params.client &&
+      !params.client.internal &&
+      (params.client.aimarketsUserId || isAimarketsTicketEnforced())
+    ) {
       const targets = [
         ...resolveDirectSessionTargets(params.method, requestParams),
         ...(resolveSessionMutationTargets({ ...params, requestParams }) ?? []),
@@ -471,6 +492,9 @@ export async function authorizeGatewayRequestPreDispatch(params: {
         clientUserId: params.client.aimarketsUserId,
         sessionKeys: targets.map((target) => target.sessionKey),
         requireSessionTarget:
+          Boolean(
+            params.client.aimarketsUserId && aimarketsBuyerMethodRequiresSession(params.method),
+          ) ||
           isAgentRunStartMethod(params.method, requestParams) ||
           params.method === "sessions.create",
       });

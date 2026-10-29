@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getUserKeys, isOpenRouterFreeModel, peekUserKeys } from "./byok.ts";
 
+vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
+  fetchWithSsrFGuard: async (params: {
+    url: string;
+    init: RequestInit;
+    maxRedirects: number;
+    policy?: unknown;
+  }) => {
+    expect(params.maxRedirects).toBe(0);
+    expect(params.policy).toBeUndefined();
+    return { response: await globalThis.fetch(params.url, params.init), release: async () => {} };
+  },
+}));
 const API = "https://api.example.test";
 const UID = "0123456789abcdef01234567";
 

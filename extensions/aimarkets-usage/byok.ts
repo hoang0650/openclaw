@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 /**
  * Bring-your-own-key support for AI Markets sessions.
  *
@@ -76,20 +77,30 @@ async function fetchKeys(params: {
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const url = `${params.apiBaseUrl}/v1/openclaw/byok/resolve?user_id=${encodeURIComponent(params.userId)}`;
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...(params.serviceSecret ? { "X-Service-Secret": params.serviceSecret } : {}),
-      },
+    const { response: res, release } = await fetchWithSsrFGuard({
+      url,
+      timeoutMs: FETCH_TIMEOUT_MS,
+      maxRedirects: 0,
+      auditContext: "aimarkets.byok.resolve",
       signal: controller.signal,
+      init: {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          ...(params.serviceSecret ? { "X-Service-Secret": params.serviceSecret } : {}),
+        },
+      },
     });
-    if (!res.ok) {
-      throw new Error(`BYOK key store responded HTTP ${res.status}`);
+    try {
+      if (!res.ok) {
+        throw new Error(`BYOK key store responded HTTP ${res.status}`);
+      }
+      const data = (await res.json().catch(() => ({}))) as { userId?: string; keys?: unknown };
+      if (data.userId !== params.userId) throw new Error("BYOK owner mismatch");
+      return sanitizeKeys(data.keys);
+    } finally {
+      await release();
     }
-    const data = (await res.json().catch(() => ({}))) as { userId?: string; keys?: unknown };
-    if (data.userId !== params.userId) throw new Error("BYOK owner mismatch");
-    return sanitizeKeys(data.keys);
   } finally {
     clearTimeout(timer);
   }

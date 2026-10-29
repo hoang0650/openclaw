@@ -31,3 +31,38 @@ it.each([
     );
   });
 });
+
+it.each([
+  "config.get",
+  "config.patch",
+  "config.set",
+  "sessions.list",
+  "cron.list",
+  "cron.add",
+  "exec.approval.resolve",
+  "agents.update",
+  "tools.invoke",
+  "unknown.pluginMethod",
+])("denies buyer global RPC %s before dispatch even with an owned session", async (method) => {
+  await withOpenClawTestState({ scenario: "minimal" }, async () => {
+    const handler = vi.fn<GatewayRequestHandler>(({ respond }) => respond(true, { allowed: true }));
+    const respond = await dispatchAuthorizationRequest(
+      method,
+      { sessionKey: `agent:main:market-${buyer}` },
+      {
+        client: authorizationClient("buyer", ["operator.admin"], { aimarketsUserId: buyer }),
+        context: {
+          getRuntimeConfig: () => ({}),
+          logGateway: { warn: vi.fn() },
+        } as unknown as GatewayRequestContext,
+        extraHandlers: { [method]: handler },
+      },
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ details: { code: "AIMARKETS_METHOD_FORBIDDEN" } }),
+    );
+  });
+});

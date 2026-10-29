@@ -249,3 +249,43 @@ export function checkAimarketsSessionAccess(params: {
   }
   return null;
 }
+
+// A buyer ticket is session authority, never authority over the shared gateway.
+// Keep this explicit: plugin registration or operator.admin must not widen it.
+const AIMARKETS_BUYER_DISCOVERY_METHODS = new Set(["health", "models.list"]);
+const AIMARKETS_BUYER_SESSION_METHODS = new Set([
+  "agent",
+  "chat.send",
+  "chat.history",
+  "chat.abort",
+  "chat.inject",
+  "sessions.create",
+  "sessions.describe",
+  "sessions.get",
+  "sessions.preview",
+  "sessions.patch",
+  "sessions.delete",
+  "sessions.reset",
+  "sessions.compact",
+  "sessions.abort",
+  "sessions.messages.subscribe",
+  "sessions.messages.unsubscribe",
+]);
+
+export function checkAimarketsBuyerMethodAccess(params: {
+  method: string;
+  clientUserId: string | undefined;
+  internal?: boolean;
+}): string | null {
+  if (params.internal || !params.clientUserId) return null;
+  if (
+    AIMARKETS_BUYER_DISCOVERY_METHODS.has(params.method) ||
+    AIMARKETS_BUYER_SESSION_METHODS.has(params.method)
+  )
+    return null;
+  return "AI Markets buyer tickets cannot access shared gateway administration or global data.";
+}
+
+export function aimarketsBuyerMethodRequiresSession(method: string): boolean {
+  return AIMARKETS_BUYER_SESSION_METHODS.has(method);
+}
