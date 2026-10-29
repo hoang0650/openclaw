@@ -16,6 +16,7 @@ import { OAuthRefreshFailureError } from "../../auth-profiles/oauth-refresh-fail
 import { resolveAuthProfileOrder } from "../../auth-profiles/order.js";
 import { ensureAuthProfileStore, saveAuthProfileStore } from "../../auth-profiles/store-runtime.js";
 import { FailoverError } from "../../failover-error.js";
+import { registerSessionCredentialResolver } from "../../session-credential-resolver.js";
 import { makeProviderModelFixture } from "../../test-helpers/provider-model-fixture.js";
 
 const mocks = vi.hoisted(() => ({
@@ -94,6 +95,7 @@ function createController(
   params: Partial<
     Pick<
       Parameters<typeof createEmbeddedRunAuthController>[0],
+      | "sessionKey"
       | "profileCandidates"
       | "authStore"
       | "fallbackConfigured"
@@ -802,5 +804,29 @@ it.each([false, true])(
         "prepareProviderRuntimeAuth failed for custom-openai, falling back to sentinel: No runtime auth plugin",
       );
     }
+  },
+);
+
+// Credential resolution must fence every candidate, including fallback profiles.
+it.each([false, true])(
+  "never reads platform auth after a buyer resolver rejects (fallback %s)",
+  async (fallbackConfigured) => {
+    const denied = new Error("buyer credential authority unavailable");
+    const resolver = vi.fn(() => {
+      throw denied;
+    });
+    const unregister = registerSessionCredentialResolver("buyer-fail-closed-proof", resolver);
+    onTestFinished(unregister);
+    mocks.getApiKeyForModelCore.mockResolvedValue(apiKeyAuth("synthetic-platform-key"));
+    const controller = createController({
+      sessionKey: "agent:main:market-" + "a".repeat(24),
+      profileCandidates: ["default", "backup"],
+      fallbackConfigured,
+    });
+    await expect(controller.initializeAuthProfile()).rejects.toThrow();
+    expect(resolver).toHaveBeenCalledTimes(2);
+    expect(mocks.getApiKeyForModelCore).not.toHaveBeenCalled();
+    expect(setRuntimeApiKey).not.toHaveBeenCalled();
+    expect(harness.apiKeyInfo).toBeNull();
   },
 );

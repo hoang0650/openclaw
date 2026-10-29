@@ -14,7 +14,7 @@ import type { IncomingMessage } from "node:http";
 export const AIMARKETS_TICKET_COOKIE = "aimt";
 
 const USER_ID_RE = /^[a-f0-9]{24}$/;
-const MARKET_SESSION_RE = /(?:^|[:/_-])market[:_-]([a-f0-9]{24})(?![a-f0-9])/gi;
+const MARKET_SESSION_RE = /(?:^|[:/_-])market[:_-]([a-f0-9]{24})/gi;
 const MAX_SCAN_DEPTH = 6;
 const MAX_SCAN_NODES = 2_000;
 
@@ -221,7 +221,21 @@ export function collectMarketSessionUserIds(params: unknown): Set<string> {
 export function checkAimarketsSessionAccess(params: {
   requestParams: unknown;
   clientUserId: string | undefined;
+  /** Targets selected by the dispatch owner, after canonical request normalization. */
+  sessionKeys?: readonly string[];
+  requireSessionTarget?: boolean;
 }): string | null {
+  if (params.clientUserId && params.sessionKeys) {
+    if (params.requireSessionTarget && params.sessionKeys.length === 0) {
+      return "AI Markets requests require an explicit buyer-owned session.";
+    }
+    for (const key of params.sessionKeys) {
+      const owners = collectMarketSessionUserIds(key);
+      if (owners.size !== 1 || !owners.has(params.clientUserId)) {
+        return "AI Markets requests require a session owned by this account.";
+      }
+    }
+  }
   const referenced = collectMarketSessionUserIds(params.requestParams);
   if (referenced.size === 0) {
     return null;
@@ -234,4 +248,46 @@ export function checkAimarketsSessionAccess(params: {
     }
   }
   return null;
+}
+
+// A buyer ticket is session authority, never authority over the shared gateway.
+// Keep this explicit: plugin registration or operator.admin must not widen it.
+const AIMARKETS_BUYER_DISCOVERY_METHODS = new Set(["health", "models.list"]);
+const AIMARKETS_BUYER_SESSION_METHODS = new Set([
+  "agent",
+  "chat.send",
+  "chat.history",
+  "chat.abort",
+  "chat.inject",
+  "sessions.create",
+  "sessions.describe",
+  "sessions.get",
+  "sessions.preview",
+  "sessions.patch",
+  "sessions.delete",
+  "sessions.reset",
+  "sessions.compact",
+  "sessions.abort",
+  "sessions.messages.subscribe",
+  "sessions.messages.unsubscribe",
+]);
+
+export function checkAimarketsBuyerMethodAccess(params: {
+  method: string;
+  clientUserId: string | undefined;
+  internal?: boolean;
+}): string | null {
+  // Browser connections also carry server-attested `internal` transport metadata.
+  // A verified buyer identity remains buyer authority regardless of that metadata.
+  if (!params.clientUserId) return null;
+  if (
+    AIMARKETS_BUYER_DISCOVERY_METHODS.has(params.method) ||
+    AIMARKETS_BUYER_SESSION_METHODS.has(params.method)
+  )
+    return null;
+  return "AI Markets buyer tickets cannot access shared gateway administration or global data.";
+}
+
+export function aimarketsBuyerMethodRequiresSession(method: string): boolean {
+  return AIMARKETS_BUYER_SESSION_METHODS.has(method);
 }
