@@ -189,6 +189,18 @@ RUN if grep -qx 'qa-lab' /tmp/openclaw-selected-plugin-dirs; then \
       cp -R extensions/qa-lab/web/dist dist/extensions/qa-lab/web/dist; \
     fi
 
+# Buyer credential and RPC isolation must pass against the actual source owners
+# while the disposable build stage still has the full test dependencies.
+RUN OPENCLAW_VITEST_RUNTIME=node node scripts/run-vitest.mjs \
+      --config test/vitest/vitest.gateway-core.config.ts run \
+      src/gateway/server-methods.aimarkets-byok.test.ts \
+      src/gateway/aimarkets-ticket.test.ts --maxWorkers=1 --passWithNoTests=false
+RUN OPENCLAW_VITEST_RUNTIME=node node scripts/run-vitest.mjs \
+      --config test/vitest/vitest.agents-embedded-agent.config.ts run \
+      src/agents/embedded-agent-runner/run/auth-controller.test.ts \
+      -t "never reads platform auth after a buyer resolver rejects" \
+      --maxWorkers=1 --passWithNoTests=false
+
 # Keep compiled workspaces and generated plugin assets, but omit development
 # dependency trees before merging the build output into the production install.
 FROM build AS runtime-build-output
