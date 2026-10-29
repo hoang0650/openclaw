@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Bring-your-own-key support for AI Markets sessions.
  *
@@ -28,6 +29,12 @@ type CacheEntry = { at: number; keys: ByokKeyMap };
 
 const CACHE_TTL_MS = 30_000;
 const FETCH_TIMEOUT_MS = 8_000;
+type KeyAuthority = { apiBaseUrl: string; serviceSecret: string; userId: string };
+function authorityCacheKey(params: KeyAuthority): string {
+  return createHash("sha256")
+    .update(JSON.stringify([params.apiBaseUrl, params.serviceSecret, params.userId.toLowerCase()]))
+    .digest("hex");
+}
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<ByokKeyMap>>();
 
@@ -81,7 +88,7 @@ async function fetchKeys(params: {
       throw new Error(`BYOK key store responded HTTP ${res.status}`);
     }
     const data = (await res.json().catch(() => ({}))) as { userId?: string; keys?: unknown };
-    if (data.userId !== params.userId) throw new Error('BYOK owner mismatch');
+    if (data.userId !== params.userId) throw new Error("BYOK owner mismatch");
     return sanitizeKeys(data.keys);
   } finally {
     clearTimeout(timer);
@@ -96,27 +103,29 @@ export async function getUserKeys(params: {
   fresh?: boolean;
 }): Promise<ByokKeyMap> {
   const userId = params.userId.toLowerCase();
-  const cached = cache.get(userId);
+  const cacheKey = authorityCacheKey({ ...params, userId });
+  const cached = cache.get(cacheKey);
   if (!params.fresh && cached && Date.now() - cached.at < CACHE_TTL_MS) {
     return cached.keys;
   }
-  const pending = inflight.get(userId);
+  const pending = inflight.get(cacheKey);
   if (pending) return pending;
   const request = fetchKeys({ ...params, userId })
     .then((keys) => {
       for (const [id, item] of cache) if (Date.now() - item.at >= CACHE_TTL_MS) cache.delete(id);
       if (cache.size >= 500) cache.delete(cache.keys().next().value!);
-      cache.set(userId, { at: Date.now(), keys });
+      cache.set(cacheKey, { at: Date.now(), keys });
       return keys;
     })
-    .finally(() => inflight.delete(userId));
-  inflight.set(userId, request);
+    .finally(() => inflight.delete(cacheKey));
+  inflight.set(cacheKey, request);
   return request;
 }
 
 /** Last known keys without network access (usage reporting only). */
-export function peekUserKeys(userId: string): ByokKeyMap | undefined {
-  return cache.get(String(userId || "").toLowerCase())?.keys;
+export function peekUserKeys(params: KeyAuthority): ByokKeyMap | undefined {
+  const entry = cache.get(authorityCacheKey(params));
+  return entry && Date.now() - entry.at < CACHE_TTL_MS ? entry.keys : undefined;
 }
 
 type SessionCredentialResolver = (request: {

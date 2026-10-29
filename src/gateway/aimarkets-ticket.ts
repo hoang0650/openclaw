@@ -14,7 +14,7 @@ import type { IncomingMessage } from "node:http";
 export const AIMARKETS_TICKET_COOKIE = "aimt";
 
 const USER_ID_RE = /^[a-f0-9]{24}$/;
-const MARKET_SESSION_RE = /(?:^|[:/_-])market[:_-]([a-f0-9]{24})(?![a-f0-9])/gi;
+const MARKET_SESSION_RE = /(?:^|[:/_-])market[:_-]([a-f0-9]{24})/gi;
 const MAX_SCAN_DEPTH = 6;
 const MAX_SCAN_NODES = 2_000;
 
@@ -221,7 +221,21 @@ export function collectMarketSessionUserIds(params: unknown): Set<string> {
 export function checkAimarketsSessionAccess(params: {
   requestParams: unknown;
   clientUserId: string | undefined;
+  /** Targets selected by the dispatch owner, after canonical request normalization. */
+  sessionKeys?: readonly string[];
+  requireSessionTarget?: boolean;
 }): string | null {
+  if (params.clientUserId && params.sessionKeys) {
+    if (params.requireSessionTarget && params.sessionKeys.length === 0) {
+      return "AI Markets requests require an explicit buyer-owned session.";
+    }
+    for (const key of params.sessionKeys) {
+      const owners = collectMarketSessionUserIds(key);
+      if (owners.size !== 1 || !owners.has(params.clientUserId)) {
+        return "AI Markets requests require a session owned by this account.";
+      }
+    }
+  }
   const referenced = collectMarketSessionUserIds(params.requestParams);
   if (referenced.size === 0) {
     return null;

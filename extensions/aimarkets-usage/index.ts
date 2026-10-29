@@ -392,7 +392,9 @@ export default definePluginEntry({
       const provider = readString(event?.provider, asRecord(ctx).modelProviderId).toLowerCase();
       const userId = resolveUserId(cfg, sessionId, ctx);
       const owner = sessionOwnerId(sessionId);
-      const byok = Boolean(owner && provider && peekUserKeys(owner)?.[provider]);
+      const byok = Boolean(
+        owner && provider && peekUserKeys({ apiBaseUrl, serviceSecret, userId: owner })?.[provider],
+      );
       let bag = pendingByRun.get(runId);
       if (!bag) {
         bag = {

@@ -20,6 +20,7 @@ describe("aimarkets BYOK helpers", () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
         success: true,
+        userId: UID,
         keys: {
           openai: { apiKey: " sk-user " },
           "byok-custom": { apiKey: "k", baseUrl: "https://llm.example.com/v1", model: "m" },
@@ -42,7 +43,9 @@ describe("aimarkets BYOK helpers", () => {
 
     await getUserKeys({ apiBaseUrl: API, serviceSecret: "s", userId: UID });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(peekUserKeys(UID)?.openai?.apiKey).toBe("sk-user");
+    expect(peekUserKeys({ apiBaseUrl: API, serviceSecret: "s", userId: UID })?.openai?.apiKey).toBe(
+      "sk-user",
+    );
 
     await getUserKeys({ apiBaseUrl: API, serviceSecret: "s", userId: UID, fresh: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
