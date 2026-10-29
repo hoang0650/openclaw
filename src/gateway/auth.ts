@@ -6,7 +6,7 @@ import {
 import { isRedactedSecretValue } from "../config/redact-sentinel.js";
 import type { GatewayAuthConfig, GatewayTrustedProxyConfig } from "../config/types.gateway.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
-import { isAimarketsHost, resolveAimarketsGatewayToken } from "./aimarkets-ticket.js";
+import { isAimarketsHost, resolveAimarketsGatewayToken, resolveAimarketsUserIdFromUpgrade } from "./aimarkets-ticket.js";
 import { AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET, type AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth-resolve.js";
 import { getHeader } from "./http-header-value.js";
@@ -530,7 +530,15 @@ async function authorizeGatewayConnectCore(
       : undefined;
     const tenantToken = tenantGatewayToken(tenantIdFromHost(publicHost));
     const providedToken = resolveConnectSecret("token", connectAuth);
+    // Derived browser credentials are never operator credentials. Their only
+    // supported surface is a buyer WebSocket carrying a verified owner ticket.
+    const buyerId = resolveAimarketsUserIdFromUpgrade(req);
+    const buyerCredentialAllowed = authSurface === "ws-control-ui" &&
+      Boolean(buyerId) && buyerId === tenantIdFromHost(publicHost);
     if (tenantToken && providedToken && safeEqualSecret(providedToken, tenantToken)) {
+      if (!buyerCredentialAllowed) {
+        return { ok: false, reason: "token_mismatch" };
+      }
       limiter?.reset(subject, rateLimitScope);
       return { ok: true, method: "token" };
     }
@@ -539,6 +547,9 @@ async function authorizeGatewayConnectCore(
     const aimarketsToken =
       auth.mode === "token" && isAimarketsHost(publicHost) ? resolveAimarketsGatewayToken() : "";
     if (aimarketsToken && providedToken && safeEqualSecret(providedToken, aimarketsToken)) {
+      if (!buyerCredentialAllowed) {
+        return { ok: false, reason: "token_mismatch" };
+      }
       limiter?.reset(subject, rateLimitScope);
       return { ok: true, method: "token" };
     }

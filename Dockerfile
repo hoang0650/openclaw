@@ -193,7 +193,7 @@ RUN if grep -qx 'qa-lab' /tmp/openclaw-selected-plugin-dirs; then \
 # while the disposable build stage still has the full test dependencies.
 RUN OPENCLAW_VITEST_RUNTIME=node node scripts/run-vitest.mjs \
       --config test/vitest/vitest.gateway-core.config.ts run \
-      src/gateway/aimarkets-ticket.test.ts --maxWorkers=1 --passWithNoTests=false && \
+      src/gateway/aimarkets-ticket.test.ts src/gateway/auth.test.ts --maxWorkers=1 --passWithNoTests=false && \
     OPENCLAW_VITEST_RUNTIME=node node scripts/run-vitest.mjs \
       --config test/vitest/vitest.gateway-database-workers.config.ts run \
       src/gateway/server-methods.aimarkets-byok.test.ts --maxWorkers=1 --passWithNoTests=false && \

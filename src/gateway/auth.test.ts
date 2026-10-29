@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+import { tenantGatewayToken } from "./tenant-gateway-token.js";
 import type { IncomingMessage } from "node:http";
 import os from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -758,5 +760,44 @@ describe("trusted-proxy auth", () => {
       ok: false,
       reason: "trusted_proxy_no_proxies_configured",
     });
+  });
+});
+
+
+describe("buyer credential surfaces", () => {
+  const uid = "0123456789abcdef01234567";
+  const other = "fedcba9876543210fedcba98";
+  const secret = "isolated-ticket-test-secret-32-characters";
+  beforeEach(() => {
+    vi.stubEnv("OPENCLAW_MARKET_TICKET_SECRET", secret);
+    vi.stubEnv("PYTHON_AI_SHARED_SECRET", "tenant-master-test-secret");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+  function input(ticketUid?: string, host = uid + ".openclaw.aimarkets.vn") {
+    const payload = Buffer.from(JSON.stringify({ uid: ticketUid, exp: Date.now() + 60000 })).toString("base64url");
+    const signature = createHmac("sha256", secret).update("aimt.v1." + payload).digest("base64url");
+    return {
+      auth: { mode: "token" as const, token: "private-operator-only-secret", allowTailscale: false },
+      connectAuth: { token: tenantGatewayToken(uid) },
+      req: request({ host, cookie: ticketUid ? "aimt=" + payload + "." + signature : undefined }),
+    };
+  }
+  it("rejects buyer tokens on both HTTP surfaces even with a valid ticket", async () => {
+    for (const authorize of [authorizeHttpGatewayConnect, authorizeControlUiReadHttpGatewayConnect]) {
+      await expect(authorize(input(uid))).resolves.toMatchObject({ ok: false });
+    }
+  });
+  it("requires a verified matching owner for browser credentials", async () => {
+    await expect(authorizeWsControlUiGatewayConnect(input())).resolves.toMatchObject({ ok: false });
+    await expect(authorizeWsControlUiGatewayConnect(input(other))).resolves.toMatchObject({ ok: false });
+    await expect(authorizeWsControlUiGatewayConnect(input(uid))).resolves.toMatchObject({ ok: true });
+  });
+  it("does not turn another tenant namespace into operator authority", async () => {
+    await expect(authorizeWsControlUiGatewayConnect(input(undefined, uid + ".phhotel.vn"))).resolves.toMatchObject({ ok: false });
+    await expect(authorizeHttpGatewayConnect(input(uid, uid + ".phhotel.vn"))).resolves.toMatchObject({ ok: false });
+  });
+  it("preserves the private operator HTTP credential", async () => {
+    const p = input(); p.connectAuth.token = "private-operator-only-secret";
+    await expect(authorizeHttpGatewayConnect(p)).resolves.toMatchObject({ ok: true });
   });
 });
