@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getUserKeys, isOpenRouterFreeModel, peekUserKeys } from "./byok.ts";
 
+vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("openclaw/plugin-sdk/ssrf-runtime")>()),
+  fetchWithSsrFGuard: async (params: {
+    url: string;
+    init: RequestInit;
+    maxRedirects: number;
+    policy?: unknown;
+  }) => {
+    expect(params.maxRedirects).toBe(0);
+    expect(params.policy).toBeUndefined();
+    return { response: await globalThis.fetch(params.url, params.init), release: async () => {} };
+  },
+}));
 const API = "https://api.example.test";
 const UID = "0123456789abcdef01234567";
 
@@ -20,6 +33,7 @@ describe("aimarkets BYOK helpers", () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
         success: true,
+        userId: UID,
         keys: {
           openai: { apiKey: " sk-user " },
           "byok-custom": { apiKey: "k", baseUrl: "https://llm.example.com/v1", model: "m" },
@@ -42,7 +56,9 @@ describe("aimarkets BYOK helpers", () => {
 
     await getUserKeys({ apiBaseUrl: API, serviceSecret: "s", userId: UID });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(peekUserKeys(UID)?.openai?.apiKey).toBe("sk-user");
+    expect(peekUserKeys({ apiBaseUrl: API, serviceSecret: "s", userId: UID })?.openai?.apiKey).toBe(
+      "sk-user",
+    );
 
     await getUserKeys({ apiBaseUrl: API, serviceSecret: "s", userId: UID, fresh: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);

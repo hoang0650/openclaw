@@ -26,6 +26,12 @@ import {
   listAgentDatabaseAdmissionRefusals,
   readAgentDatabaseAdmissionRefusal,
 } from "../../state/agent-database-admission.js";
+import {
+  aimarketsBuyerMethodRequiresSession,
+  checkAimarketsBuyerMethodAccess,
+  checkAimarketsSessionAccess,
+  isAimarketsTicketEnforced,
+} from "../aimarkets-ticket.js";
 import { readChatInputRecoveryAdmission } from "../chat-input-recovery-source.js";
 import type { ExpectedProfileBinding } from "../expected-profile.js";
 import type { GatewayMethodRegistryView } from "../methods/descriptor.js";
@@ -34,6 +40,7 @@ import {
   type GatewaySessionAccessAuthority,
 } from "../session-access-authority.js";
 import {
+  isAgentRunStartMethod,
   isDirectSessionReadMethod,
   sessionMutationTargetFields,
 } from "../session-method-policy.js";
@@ -210,6 +217,18 @@ export async function authorizeGatewayRequestPreDispatch(params: {
     : undefined;
   let startupReadSignal: AbortSignal | undefined;
   let startupReadDeadline: number | undefined;
+  const buyerMethodError = checkAimarketsBuyerMethodAccess({
+    method: params.method,
+    clientUserId: params.client?.aimarketsUserId,
+    internal: Boolean(params.client?.internal),
+  });
+  if (buyerMethodError) {
+    return {
+      error: errorShape(ErrorCodes.FORBIDDEN, buyerMethodError, {
+        details: { code: "AIMARKETS_METHOD_FORBIDDEN" },
+      }),
+    };
+  }
   let startupReadResult: { cfg: OpenClawConfig; agents?: string[]; timedOut: boolean } | undefined;
   signal?.throwIfAborted();
   if (params.context.ensureSessionRowProjection) {
@@ -452,6 +471,40 @@ export async function authorizeGatewayRequestPreDispatch(params: {
       }
       assertChatRoutingCurrent();
       requestParams = normalized.value;
+    }
+    // The target owner, not a user-chosen name alone, decides buyer credential scope.
+    // Missing run targets must not select the operator's global/default session.
+    if (
+      params.client &&
+      (params.client.aimarketsUserId ||
+        (!params.client.internal && isAimarketsTicketEnforced()))
+    ) {
+      const targets = [
+        ...resolveDirectSessionTargets(params.method, requestParams),
+        ...(resolveSessionMutationTargets({ ...params, requestParams }) ?? []),
+      ];
+      if (params.method === "sessions.create") {
+        const key = readSessionSharingStringParam(requestParams, "key");
+        if (key) targets.push({ sessionKey: key });
+      }
+      const message = checkAimarketsSessionAccess({
+        requestParams,
+        clientUserId: params.client.aimarketsUserId,
+        sessionKeys: targets.map((target) => target.sessionKey),
+        requireSessionTarget:
+          Boolean(
+            params.client.aimarketsUserId && aimarketsBuyerMethodRequiresSession(params.method),
+          ) ||
+          isAgentRunStartMethod(params.method, requestParams) ||
+          params.method === "sessions.create",
+      });
+      if (message) {
+        return {
+          error: errorShape(ErrorCodes.FORBIDDEN, message, {
+            details: { code: "AIMARKETS_SESSION_FORBIDDEN" },
+          }),
+        };
+      }
     }
     const projection =
       !sessionPolicy &&

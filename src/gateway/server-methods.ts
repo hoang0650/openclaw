@@ -18,7 +18,6 @@ import {
 } from "../process/gateway-work-admission.js";
 import { getAsyncWorkSignal } from "../shared/async-work-scope.js";
 import { AgentDatabaseAdmissionError } from "../state/agent-database-admission.js";
-import { checkAimarketsSessionAccess, isAimarketsTicketEnforced } from "./aimarkets-ticket.js";
 import { formatControlPlaneActor, resolveControlPlaneActor } from "./control-plane-audit.js";
 import {
   consumeControlPlaneWriteBudget,
@@ -395,22 +394,6 @@ export async function handleGatewayRequest(
       if (authorization.error) {
         respond(false, undefined, authorization.error);
         return;
-      }
-      if (client && !client.internal && isAimarketsTicketEnforced()) {
-        const aimarketsError = checkAimarketsSessionAccess({
-          requestParams: req.params,
-          clientUserId: client.aimarketsUserId,
-        });
-        if (aimarketsError) {
-          respond(
-            false,
-            undefined,
-            errorShape(ErrorCodes.INVALID_REQUEST, aimarketsError, {
-              details: { code: "AIMARKETS_SESSION_FORBIDDEN" },
-            }),
-          );
-          return;
-        }
       }
       const handler = methodRegistry.getHandler(req.method) as GatewayRequestHandler | undefined;
       if (!handler) {
