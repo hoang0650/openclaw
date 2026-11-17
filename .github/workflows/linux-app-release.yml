@@ -319,11 +319,15 @@ jobs:
           persist-credentials: false
 
       - name: Install selected-tag dependencies
+        env:
+          XDG_CACHE_HOME: ${{ runner.temp }}/openclaw-selected-tag-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          npm_config_cache: ${{ runner.temp }}/openclaw-selected-tag-npm-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          PNPM_HOME: ${{ runner.temp }}/openclaw-selected-tag-pnpm-home-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           corepack enable
-          pnpm install --frozen-lockfile --prefer-offline \
-            --config.ignore-scripts=false --config.engine-strict=false \
-            --config.enable-pre-post-scripts=true --config.side-effects-cache=true
+          pnpm install --frozen-lockfile --prefer-offline=false \
+            --config.ignore-scripts=true --config.engine-strict=false \
+            --config.enable-pre-post-scripts=false --config.side-effects-cache=false
 
       - name: Checkout trusted Linux packaging tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
