@@ -130,6 +130,8 @@ export type SessionDeleteOptions = {
   deleteTranscript?: boolean;
   expectedSessionId?: string;
   archivedOnly?: boolean;
+  /** The caller has already archived this session. */
+  alreadyArchived?: boolean;
 };
 
 export type SessionDeleteTarget = SessionDeleteOptions & {

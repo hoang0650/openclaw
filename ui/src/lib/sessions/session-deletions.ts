@@ -1,4 +1,5 @@
 import type { GatewaySessionRow, SessionsListResult } from "../../api/types.ts";
+import { hasOperatorAdminAccess, hasOperatorWriteAccess } from "../../app/operator-access.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../format-error.ts";
 import { showToast } from "../toast.ts";
@@ -8,7 +9,7 @@ import {
   resolveUiConversationIdentity,
   resolveUiSelectedGlobalAgentId,
 } from "./session-key.ts";
-import { requestSessionDelete } from "./session-requests.ts";
+import { requestSessionDelete, requestSessionPatch } from "./session-requests.ts";
 import type {
   SessionConnectionOwner,
   SessionDeleteBatchResult,
@@ -189,7 +190,27 @@ export function createSessionDeletions(host: DeletionHost) {
     const { target } = deletion;
     deletion.operation = (async () => {
       try {
-        const response = await requestSessionDelete(scope.client, target.key, target);
+        const auth = host.snapshot().hello?.auth ?? null;
+        const archiveFirst =
+          target.archivedOnly === undefined &&
+          !target.alreadyArchived &&
+          auth !== null &&
+          hasOperatorWriteAccess(auth) &&
+          !hasOperatorAdminAccess(auth);
+        const options = {
+          ...target,
+          ...(deletion.sessionId ? { expectedSessionId: deletion.sessionId } : {}),
+        };
+        if (archiveFirst) {
+          await requestSessionPatch(scope.client, target.key, { archived: true }, options);
+          if (!host.connection.isCurrent(scope) || !owns(deletion)) {
+            throw new Error("Session archive completed on a replaced Gateway connection");
+          }
+        }
+        const response = await requestSessionDelete(scope.client, target.key, {
+          ...options,
+          ...(archiveFirst || target.alreadyArchived ? { archivedOnly: true } : {}),
+        });
         if (!owns(deletion)) {
           return { deleted: false };
         }

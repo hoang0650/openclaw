@@ -6,6 +6,7 @@ import type {
 } from "../../../packages/gateway-protocol/src/index.js";
 import { createDeferredCore } from "../../../src/shared/deferred.js";
 import type { ModelCatalogResult } from "../api/types.ts";
+import { filterModelsForAudience } from "../app/audience-models.ts";
 import type { ApplicationGateway } from "../app/context.ts";
 import { t } from "../i18n/index.ts";
 import { registerModelControlsEnglish } from "../i18n/locales/en-model-controls.ts";
@@ -250,6 +251,12 @@ export async function loadModelCatalog(
     }
   };
   void request()
+    // Fork (AI Markets): hide PHHotel models on AI Markets surfaces and vice versa.
+    .then((result) =>
+      Array.isArray(result?.models)
+        ? { ...result, models: filterModelsForAudience(result.models) }
+        : result,
+    )
     .then((result) => {
       // Catalog changes during a read are best effort until the next refresh.
       publishModelCatalogResult(read, params, result);

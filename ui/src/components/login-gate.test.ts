@@ -396,6 +396,26 @@ describe("login gate failure recovery", () => {
     ]);
   });
 
+  it("renders the pairing request id as its own copyable value", async () => {
+    const requestId = "72515e44-4900-45d3-a2a4-e6ea72f43e5e";
+    const element = await mountFailure(
+      `pairing required (requestId: ${requestId})`,
+      Codes.PAIRING_REQUIRED,
+    );
+    const box = element.querySelector<HTMLElement>(".login-gate__request-id");
+    expect(box?.dataset.requestId).toBe(requestId);
+    expect(box?.querySelector("code")?.textContent?.trim()).toBe(requestId);
+    expect(box?.querySelector(".chat-copy-btn")).not.toBeNull();
+    expect(element.querySelector(".login-gate__command--hero code")?.textContent?.trim()).toBe(
+      `openclaw devices approve ${requestId}`,
+    );
+  });
+
+  it("omits the request id box when the gateway sent no id", async () => {
+    const element = await mountFailure("pairing required", Codes.PAIRING_REQUIRED);
+    expect(element.querySelector(".login-gate__request-id")).toBeNull();
+  });
+
   it("surfaces denied gateway-command copying from the Space key", async () => {
     const { writeText, execCommand } = clipboard(
       vi.fn().mockRejectedValue(new DOMException("Clipboard access denied")),

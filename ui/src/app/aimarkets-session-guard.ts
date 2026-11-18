@@ -28,7 +28,7 @@ type Loc = { pathname?: string; search?: string; hash?: string };
 /** Buyer id that owns a `market-<userId>` session key, or null for other keys. */
 export function marketSessionOwner(sessionKey: string | null | undefined): string | null {
   const m = MARKET_OWNER_RE.exec(String(sessionKey ?? ""));
-  return m ? m[1].toLowerCase() : null;
+  return m?.[1] ? m[1].toLowerCase() : null;
 }
 
 /** True when the key is a market session owned by someone other than userId. */
@@ -90,7 +90,7 @@ export function correctForeignSessionLocation<T extends Loc>(
 ): T | null {
   let pathname = location.pathname ?? "";
   const m = KEY_SEGMENT_RE.exec(pathname);
-  if (m) {
+  if (m?.[1]) {
     let key = m[1];
     try {
       key = decodeURIComponent(m[1]);

@@ -1,5 +1,4 @@
 import { createHmac } from "node:crypto";
-import { tenantGatewayToken } from "./tenant-gateway-token.js";
 import type { IncomingMessage } from "node:http";
 import os from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +15,7 @@ import {
 } from "./auth.js";
 import { markGatewayIngressTransport } from "./ingress-attribution.js";
 import { hasForwardedRequestHeaders, isLocalDirectRequest } from "./net.js";
+import { tenantGatewayToken } from "./tenant-gateway-token.js";
 
 function createSingleAttemptLimiter() {
   return createGatewayAuthRateLimiter(
@@ -216,6 +216,90 @@ describe("gateway auth", () => {
       browserOriginPolicy: { requestHost: host, origin },
     });
     expect(result).toEqual(expected);
+  });
+
+  describe("AI Markets derived token (fork)", () => {
+    const marketToken = "d2acf1f3372abe6942578a088ea811b39e1f14f85dabf74b";
+    const marketHost = "0123456789abcdef01234567.openclaw.aimarkets.vn";
+    const reqFor = (host: string) => request({ host });
+    beforeEach(() => {
+      vi.stubEnv("AIMARKETS_SERVICE_SECRET", "service-secret"); // pragma: allowlist secret
+      vi.stubEnv("OPENCLAW_MARKET_TICKET_SECRET", "ticket-secret"); // pragma: allowlist secret
+      vi.stubEnv("OPENCLAW_AIMARKETS_HOST_SUFFIX", "");
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("rejects the derived buyer token on HTTP even on AI Markets hosts", async () => {
+      await expect(
+        authorizeHttpGatewayConnect({
+          auth: { mode: "token", token: "secret", allowTailscale: false },
+          connectAuth: { token: marketToken },
+          req: reqFor(marketHost),
+        }),
+      ).resolves.toMatchObject({ ok: false, reason: "token_mismatch" });
+    });
+
+    it("rejects the derived token on other hosts", async () => {
+      await expect(
+        authorizeHttpGatewayConnect({
+          auth: { mode: "token", token: "secret", allowTailscale: false },
+          connectAuth: { token: marketToken },
+          req: reqFor("hotel1.phhotel.vn"),
+        }),
+      ).resolves.toMatchObject({ ok: false, reason: "token_mismatch" });
+    });
+
+    it("rejects the derived token without a request host", async () => {
+      await expect(
+        authorizeHttpGatewayConnect({
+          auth: { mode: "token", token: "secret", allowTailscale: false },
+          connectAuth: { token: marketToken },
+        }),
+      ).resolves.toMatchObject({ ok: false });
+    });
+
+    it("rejects a wrong token on AI Markets hosts", async () => {
+      await expect(
+        authorizeHttpGatewayConnect({
+          auth: { mode: "token", token: "secret", allowTailscale: false },
+          connectAuth: { token: "nope" },
+          req: reqFor(marketHost),
+        }),
+      ).resolves.toMatchObject({ ok: false, reason: "token_mismatch" });
+    });
+
+    it("does not let the derived token satisfy password mode", async () => {
+      await expect(
+        authorizeHttpGatewayConnect({
+          auth: { mode: "password", password: "pw", allowTailscale: false },
+          connectAuth: { token: marketToken, password: marketToken },
+          req: reqFor(marketHost),
+        }),
+      ).resolves.toMatchObject({ ok: false });
+    });
+
+    it("rejects the derived token when the service secret is unset", async () => {
+      vi.stubEnv("AIMARKETS_SERVICE_SECRET", "");
+      await expect(
+        authorizeHttpGatewayConnect({
+          auth: { mode: "token", token: "secret", allowTailscale: false },
+          connectAuth: { token: marketToken },
+          req: reqFor(marketHost),
+        }),
+      ).resolves.toMatchObject({ ok: false });
+    });
+
+    it("still accepts the configured shared token on AI Markets hosts", async () => {
+      await expect(
+        authorizeHttpGatewayConnect({
+          auth: { mode: "token", token: "secret", allowTailscale: false },
+          connectAuth: { token: "secret" },
+          req: reqFor(marketHost),
+        }),
+      ).resolves.toMatchObject({ ok: true, method: "token" });
+    });
   });
 
   it("reports missing password config even when a token is configured", async () => {
@@ -763,7 +847,6 @@ describe("trusted-proxy auth", () => {
   });
 });
 
-
 describe("buyer credential surfaces", () => {
   const uid = "0123456789abcdef01234567";
   const other = "fedcba9876543210fedcba98";
@@ -774,30 +857,50 @@ describe("buyer credential surfaces", () => {
   });
   afterEach(() => vi.unstubAllEnvs());
   function input(ticketUid?: string, host = uid + ".openclaw.aimarkets.vn") {
-    const payload = Buffer.from(JSON.stringify({ uid: ticketUid, exp: Date.now() + 60000 })).toString("base64url");
-    const signature = createHmac("sha256", secret).update("aimt.v1." + payload).digest("base64url");
+    const payload = Buffer.from(
+      JSON.stringify({ uid: ticketUid, exp: Date.now() + 60000 }),
+    ).toString("base64url");
+    const signature = createHmac("sha256", secret)
+      .update("aimt.v1." + payload)
+      .digest("base64url");
     return {
-      auth: { mode: "token" as const, token: "private-operator-only-secret", allowTailscale: false },
+      auth: {
+        mode: "token" as const,
+        token: "private-operator-only-secret",
+        allowTailscale: false,
+      },
       connectAuth: { token: tenantGatewayToken(uid) },
       req: request({ host, cookie: ticketUid ? "aimt=" + payload + "." + signature : undefined }),
     };
   }
   it("rejects buyer tokens on both HTTP surfaces even with a valid ticket", async () => {
-    for (const authorize of [authorizeHttpGatewayConnect, authorizeControlUiReadHttpGatewayConnect]) {
+    for (const authorize of [
+      authorizeHttpGatewayConnect,
+      authorizeControlUiReadHttpGatewayConnect,
+    ]) {
       await expect(authorize(input(uid))).resolves.toMatchObject({ ok: false });
     }
   });
   it("requires a verified matching owner for browser credentials", async () => {
     await expect(authorizeWsControlUiGatewayConnect(input())).resolves.toMatchObject({ ok: false });
-    await expect(authorizeWsControlUiGatewayConnect(input(other))).resolves.toMatchObject({ ok: false });
-    await expect(authorizeWsControlUiGatewayConnect(input(uid))).resolves.toMatchObject({ ok: true });
+    await expect(authorizeWsControlUiGatewayConnect(input(other))).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(authorizeWsControlUiGatewayConnect(input(uid))).resolves.toMatchObject({
+      ok: true,
+    });
   });
   it("does not turn another tenant namespace into operator authority", async () => {
-    await expect(authorizeWsControlUiGatewayConnect(input(undefined, uid + ".phhotel.vn"))).resolves.toMatchObject({ ok: false });
-    await expect(authorizeHttpGatewayConnect(input(uid, uid + ".phhotel.vn"))).resolves.toMatchObject({ ok: false });
+    await expect(
+      authorizeWsControlUiGatewayConnect(input(undefined, uid + ".phhotel.vn")),
+    ).resolves.toMatchObject({ ok: false });
+    await expect(
+      authorizeHttpGatewayConnect(input(uid, uid + ".phhotel.vn")),
+    ).resolves.toMatchObject({ ok: false });
   });
   it("preserves the private operator HTTP credential", async () => {
-    const p = input(); p.connectAuth.token = "private-operator-only-secret";
+    const p = input();
+    p.connectAuth.token = "private-operator-only-secret";
     await expect(authorizeHttpGatewayConnect(p)).resolves.toMatchObject({ ok: true });
   });
 });

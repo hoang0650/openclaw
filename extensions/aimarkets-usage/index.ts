@@ -100,7 +100,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 function expandEnvValue(value: string): string {
   const trimmed = String(value || "").trim();
   const exact = /^\$\{([A-Z0-9_]+)\}$/.exec(trimmed);
-  if (exact) return readEnv(exact[1]);
+  if (exact?.[1]) return readEnv(exact[1]);
   return trimmed.replace(/\$\{([A-Z0-9_]+)\}/g, (_m, name: string) => readEnv(name) || "");
 }
 
@@ -168,7 +168,7 @@ function resolveUserId(cfg: PluginConfig, sessionId: string, ctx: unknown): stri
   const fromCfg = expandEnvValue(cfg.userId || "");
   if (fromCfg) return fromCfg;
   const m = /(?:^|[:/_-])market[:_-]([a-f0-9]{24})/i.exec(sessionId);
-  if (m) return m[1].toLowerCase();
+  if (m?.[1]) return m[1].toLowerCase();
   const ctxObj = asRecord(ctx);
   return readString(ctxObj.userId, ctxObj.user_id).toLowerCase();
 }
@@ -176,7 +176,7 @@ function resolveUserId(cfg: PluginConfig, sessionId: string, ctx: unknown): stri
 /** Buyer id bound to the session key itself; never taken from mutable config. */
 function sessionOwnerId(sessionKey: string): string {
   const m = /(?:^|[:/_-])market[:_-]([a-f0-9]{24})/i.exec(sessionKey);
-  return m ? m[1].toLowerCase() : "";
+  return m?.[1] ? m[1].toLowerCase() : "";
 }
 
 function hostBits(ctx: unknown, sessionId: string): string[] {

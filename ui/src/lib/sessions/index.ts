@@ -336,7 +336,6 @@ export function createSessionCapability(
     claimPermissionProjection: permissions.claim,
     capturePatchFields: (target) => capturePatchFields(target),
     retirePullRequestSummary,
-    readAuth: () => gateway.snapshot.hello?.auth ?? null,
   });
 
   const deletions = createSessionDeletions({

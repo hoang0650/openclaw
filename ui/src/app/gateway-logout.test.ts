@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { storeAimarketsTicket, syncAimarketsTicketCookie } from "./aimarkets-ticket.ts";
 import {
   clearGatewayBrowserState,
@@ -57,6 +57,17 @@ describe("gateway logout / AI Markets identity switch", () => {
     expect(sessionStorage.getItem("openclaw.control.token.v1:wss://x")).toBeNull();
     expect(localStorage.getItem("openclaw.i18n.locale")).toBe("vi");
     expect(cookieHasTicket()).toBe(false);
+  });
+
+  it("drops the Control UI IndexedDB cache so the next buyer never sees the previous chats", () => {
+    const deleteDatabase = vi.fn();
+    vi.stubGlobal("indexedDB", { deleteDatabase });
+    try {
+      clearGatewayBrowserState();
+      expect(deleteDatabase).toHaveBeenCalledWith("openclaw-control-ui");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("resolves the launch buyer from the ticket first, then userId", () => {

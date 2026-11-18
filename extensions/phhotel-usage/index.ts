@@ -63,7 +63,7 @@ function readString(...values: unknown[]): string {
 function expandEnvValue(value: string): string {
   const trimmed = String(value || "").trim();
   const exact = /^\$\{([A-Z0-9_]+)\}$/.exec(trimmed);
-  if (exact) {
+  if (exact?.[1]) {
     return readEnv(exact[1]);
   }
   return trimmed.replace(/\$\{([A-Z0-9_]+)\}/g, (_m, name: string) => readEnv(name) || "");

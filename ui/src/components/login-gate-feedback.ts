@@ -71,6 +71,8 @@ export type LoginFailureFeedback = {
   summary: string;
   /** One command that resolves the failure on its own, shown as the hero action. */
   primaryCommand?: string;
+  /** AI Markets: pending pairing request id, shown as its own copyable value. */
+  requestId?: string;
   refreshAction?: { label: string };
   steps: LoginFailureStep[];
   docsHref: string;
@@ -96,6 +98,7 @@ function buildFeedback(
     titleKey?: string;
     summaryKey?: string;
     primaryCommand?: string;
+    requestId?: string;
     stepKeys: LoginFailureStepDefinition[];
     stepParams?: Record<string, string>;
     refreshAction?: { label: string };
@@ -112,6 +115,7 @@ function buildFeedback(
     title: translate(params.titleKey ?? "title"),
     summary: translate(params.summaryKey ?? "summary"),
     primaryCommand: params.primaryCommand,
+    ...(params.requestId ? { requestId: params.requestId } : {}),
     refreshAction: params.refreshAction,
     steps: params.stepKeys.map((step) =>
       typeof step === "string"
@@ -239,6 +243,8 @@ export function resolveLoginFailureFeedback(
       primaryCommand: pairing.requestId
         ? `openclaw devices approve ${pairing.requestId}`
         : "openclaw devices approve --latest",
+      // Only the normalized id (same value as the approve command); unsafe ids are dropped upstream.
+      ...(pairing.requestId ? { requestId: pairing.requestId } : {}),
       stepKeys: [
         ...(pairing.requestId ? [] : ["stepLatest"]),
         { key: "stepDashboard", commands: ["openclaw dashboard"] },
