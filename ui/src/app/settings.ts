@@ -138,11 +138,24 @@ type BooleanSettingKey = {
 }[keyof UiPreferences] &
   keyof PersistedUiSettings;
 
-function isViteDevPage(): boolean {
-  if (typeof document === "undefined") {
-    return false;
+export function normalizeGatewayUrlForCurrentPage(gatewayUrl: string): string {
+  if (typeof window === "undefined" || window.location.protocol !== "https:") {
+    return gatewayUrl;
   }
-  return Boolean(document.querySelector('script[src*="/@vite/client"]'));
+  const raw = normalizeOptionalString(gatewayUrl);
+  if (!raw) {
+    return gatewayUrl;
+  }
+  try {
+    const parsed = new URL(raw, window.location.href);
+    if (parsed.protocol !== "ws:" || parsed.host !== window.location.host) {
+      return gatewayUrl;
+    }
+    parsed.protocol = "wss:";
+    return parsed.toString();
+  } catch {
+    return gatewayUrl;
+  }
 }
 
 function deriveDefaultGatewayUrl(): { pageUrl: string; effectiveUrl: string } {
@@ -153,7 +166,7 @@ function deriveDefaultGatewayUrl(): { pageUrl: string; effectiveUrl: string } {
   if (devGateway) {
     return { pageUrl, effectiveUrl: devGateway.gatewayUrl };
   }
-  if (isRemoteControlUiIngress() || !isViteDevPage()) {
+  if (isRemoteControlUiIngress() || globalThis.OPENCLAW_UI_DEV_SERVER !== true) {
     return { pageUrl, effectiveUrl: pageUrl };
   }
   // location.hostname already carries brackets for IPv6 literals; wrapping
@@ -161,31 +174,6 @@ function deriveDefaultGatewayUrl(): { pageUrl: string; effectiveUrl: string } {
   const hostname = location.hostname;
   const host = hostname.includes(":") && !hostname.startsWith("[") ? `[${hostname}]` : hostname;
   return { pageUrl, effectiveUrl: `${proto}://${host}:18789` };
-}
-
-/**
- * Fork: a saved same-host ws:// URL would be blocked as mixed content on an
- * https page (e.g. behind Traefik TLS), so upgrade it to wss://.
- */
-export function normalizeGatewayUrlForCurrentPage(gatewayUrl: string): string {
-  if (typeof window === "undefined" || window.location?.protocol !== "https:") {
-    return gatewayUrl;
-  }
-  const raw = normalizeOptionalString(gatewayUrl);
-  if (!raw) {
-    return gatewayUrl;
-  }
-  try {
-    const parsed = new URL(raw, window.location.href);
-    const pageUrl = new URL(window.location.href);
-    if (parsed.protocol !== "ws:" || parsed.host !== pageUrl.host) {
-      return gatewayUrl;
-    }
-    parsed.protocol = "wss:";
-    return parsed.toString();
-  } catch {
-    return gatewayUrl;
-  }
 }
 
 /**
@@ -434,9 +422,8 @@ export function loadUiPreferences(
     }
     const parsed = source.parsed;
     const parsedGatewayUrl = source.gatewayUrl;
-    const gatewayUrl = normalizeGatewayUrlForCurrentPage(
-      targetGatewayUrl ?? (parsedGatewayUrl === pageDerivedUrl ? defaultUrl : parsedGatewayUrl),
-    );
+    const gatewayUrl =
+      targetGatewayUrl ?? (parsedGatewayUrl === pageDerivedUrl ? defaultUrl : parsedGatewayUrl);
     const scopedSessionSelection = resolveScopedSessionSelection(gatewayUrl, parsed, defaults);
     const customTheme = parseImportedCustomTheme(parsed.customTheme);
     const { theme, mode } = parseThemeSelection(parsed.theme, parsed.themeMode);
@@ -626,22 +613,21 @@ export function saveSettings(
     realtimeTalkInputDeviceId: normalizeOptionalString(next.realtimeTalkInputDeviceId),
     realtimeTalkVideoDeviceId: normalizeOptionalString(next.realtimeTalkVideoDeviceId),
     composerHoldToRecord: next.composerHoldToRecord === false ? false : undefined,
-    talkCameraAutoEnable:
-      typeof next.talkCameraAutoEnable === "boolean" ? next.talkCameraAutoEnable : undefined,
+    talkCameraAutoEnable: next.talkCameraAutoEnable,
     chatSplitLayout: next.chatSplitLayout || undefined,
     // Right dock is the default; only the opt-in bottom dock persists.
     chatWorkspaceDock: next.chatWorkspaceDock === "bottom" ? "bottom" : undefined,
     boardSessionViews:
       next.boardSessionViews && Object.keys(next.boardSessionViews).length > 0
-        ? normalizeBoardSessionViews(next.boardSessionViews)
+        ? next.boardSessionViews
         : undefined,
     sidebarSessionLayouts:
       next.sidebarSessionLayouts && Object.keys(next.sidebarSessionLayouts).length > 0
-        ? normalizeSidebarSessionLayouts(next.sidebarSessionLayouts)
+        ? next.sidebarSessionLayouts
         : undefined,
     sidebarSessionActivePanels:
       next.sidebarSessionActivePanels && Object.keys(next.sidebarSessionActivePanels).length > 0
-        ? normalizeSidebarSessionActivePanels(next.sidebarSessionActivePanels)
+        ? next.sidebarSessionActivePanels
         : undefined,
     navWidth: next.navWidth, // Persist size, not visibility: shared localStorage leaks across tabs.
     sidebarAgentsMode: next.sidebarAgentsMode === "roster" ? "roster" : "chip",

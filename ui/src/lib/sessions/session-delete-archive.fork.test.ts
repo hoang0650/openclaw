@@ -4,9 +4,10 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { createSessionCapability } from "./index.ts";
 import { createGatewayHarness, sessionsResult } from "./session-capability.test-support.ts";
 
-function harness(scopes: string[]) {
-  const request = vi.fn(async (method: string) => {
+function harness(scopes: string[], onArchive?: () => Promise<void>) {
+  const request = vi.fn(async (method: string, _params?: unknown) => {
     if (method === "sessions.patch") {
+      await onArchive?.();
       return { ok: true };
     }
     if (method === "sessions.delete") {
@@ -18,16 +19,16 @@ function harness(scopes: string[]) {
     return {};
   });
   const client = { request } as unknown as GatewayBrowserClient;
-  const { gateway } = createGatewayHarness(client);
-  const base = gateway.snapshot;
+  const { gateway, publish } = createGatewayHarness(client);
   const withAuth = {
     ...gateway,
     get snapshot() {
-      return { ...base, hello: { auth: { role: "operator", scopes } } as never };
+      return { ...gateway.snapshot, hello: { auth: { role: "operator", scopes } } as never };
     },
   };
   return {
     request,
+    publish,
     sessions: createSessionCapability(
       withAuth as never,
       {
@@ -61,6 +62,21 @@ describe("fork archive-then-delete", () => {
     const { request, sessions } = harness(["operator.admin"]);
     await sessions.delete("agent:main:chat-3");
     expect(request.mock.calls.map(([method]) => method)).not.toContain("sessions.patch");
+    sessions.dispose();
+  });
+
+  it("does not delete after the connection changes during archive", async () => {
+    const archive = Promise.withResolvers<void>();
+    const { request, publish, sessions } = harness(["operator.write"], () => archive.promise);
+    const deletion = sessions.delete("agent:main:chat-4");
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith("sessions.patch", expect.anything(), expect.anything()),
+    );
+    publish(false);
+    const rejected = expect(deletion).rejects.toThrow("replaced Gateway connection");
+    archive.resolve();
+    await rejected;
+    expect(request.mock.calls.map(([method]) => method)).not.toContain("sessions.delete");
     sessions.dispose();
   });
 });

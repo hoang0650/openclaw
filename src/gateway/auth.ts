@@ -6,7 +6,7 @@ import {
 import { isRedactedSecretValue } from "../config/redact-sentinel.js";
 import type { GatewayAuthConfig, GatewayTrustedProxyConfig } from "../config/types.gateway.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
-import { isAimarketsHost, resolveAimarketsGatewayToken } from "./aimarkets-ticket.js";
+import { isAimarketsHost, resolveAimarketsGatewayToken, resolveAimarketsUserIdFromUpgrade } from "./aimarkets-ticket.js";
 import { AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET, type AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth-resolve.js";
 import { getHeader } from "./http-header-value.js";
@@ -30,6 +30,7 @@ import {
 } from "./net.js";
 import { checkBrowserOrigin, type BrowserOriginPolicy } from "./origin-check.js";
 import { withSerializedRateLimitAttempt } from "./rate-limit-attempt-serialization.js";
+import { tenantGatewayToken, tenantIdFromHost } from "./tenant-gateway-token.js";
 export { resolveGatewayAuth, type ResolvedGatewayAuth } from "./auth-resolve.js";
 const LEGACY_OPENCLAW_ENV_NOTE =
   " Legacy CLAWDBOT_* and MOLTBOT_* environment variables are ignored; use OPENCLAW_* names.";
@@ -285,11 +286,6 @@ function authorizeTrustedProxyBrowserOrigin(params: {
   });
 }
 
-function readHostHeader(req: { headers?: Record<string, string | string[] | undefined> } | undefined): string | undefined {
-  const raw = req?.headers?.host;
-  return Array.isArray(raw) ? raw[0] : raw;
-}
-
 async function authorizeSharedSecretAuth(params: {
   method: "token" | "password";
   configuredSecret?: string;
@@ -528,20 +524,35 @@ async function authorizeGatewayConnectCore(
     return rateLimitResult;
   }
 
-  if (auth.mode === "token") {
-    // One gateway serves PHHotel and AI Markets: AI Markets hosts also accept
-    // the token derived from the AI Markets secrets (fork: AI Markets).
-    const aimarketsToken = isAimarketsHost(readHostHeader(req)) ? resolveAimarketsGatewayToken() : "";
+  if (auth.mode === "token" || auth.mode === "password") {
+    const publicHost = req
+      ? (getHeader(req, "x-forwarded-host") ?? getHeader(req, "host"))
+      : undefined;
+    const tenantToken = tenantGatewayToken(tenantIdFromHost(publicHost));
     const providedToken = resolveConnectSecret("token", connectAuth);
-    if (aimarketsToken && providedToken && safeEqualSecret(providedToken, aimarketsToken)) {
-      if (resetOnSuccess) {
-        limiter?.reset(subject, rateLimitScope);
+    // Derived browser credentials are never operator credentials. Their only
+    // supported surface is a buyer WebSocket carrying a verified owner ticket.
+    const buyerId = resolveAimarketsUserIdFromUpgrade(req);
+    const buyerCredentialAllowed = authSurface === "ws-control-ui" &&
+      Boolean(buyerId) && buyerId === tenantIdFromHost(publicHost);
+    if (tenantToken && providedToken && safeEqualSecret(providedToken, tenantToken)) {
+      if (!buyerCredentialAllowed) {
+        return { ok: false, reason: "token_mismatch" };
       }
+      limiter?.reset(subject, rateLimitScope);
       return { ok: true, method: "token" };
     }
-  }
-
-  if (auth.mode === "token" || auth.mode === "password") {
+    // One gateway serves PHHotel and AI Markets: AI Markets hosts also accept
+    // the older shared token derived from the AI Markets secrets.
+    const aimarketsToken =
+      auth.mode === "token" && isAimarketsHost(publicHost) ? resolveAimarketsGatewayToken() : "";
+    if (aimarketsToken && providedToken && safeEqualSecret(providedToken, aimarketsToken)) {
+      if (!buyerCredentialAllowed) {
+        return { ok: false, reason: "token_mismatch" };
+      }
+      limiter?.reset(subject, rateLimitScope);
+      return { ok: true, method: "token" };
+    }
     return await authorizeSharedSecretAuth({
       method: auth.mode,
       configuredSecret: auth[auth.mode],

@@ -238,30 +238,3 @@ describe("ws connect policy", () => {
     );
   });
 });
-
-describe("AI Markets ticket pairing skip (fork)", () => {
-  const base: Partial<SkipPairingInput> = {
-    isControlUi: true,
-    device: deviceRaw("dev-1"),
-    role: "operator",
-    authMode: "token",
-    authMethod: "token",
-    aimarketsTicketVerified: true,
-  };
-
-  test("skips first-time pairing for a token-authed Control UI operator with a verified ticket", () => {
-    expectSkipPairing(base, "aimarkets-ticket");
-  });
-
-  test.each<[string, Partial<SkipPairingInput>]>([
-    ["ticket not verified", { aimarketsTicketVerified: false }],
-    ["ticket flag omitted", { aimarketsTicketVerified: undefined }],
-    ["not Control UI", { isControlUi: false }],
-    ["node role", { role: "node" }],
-    ["password auth", { authMethod: "password", authMode: "password" }],
-    ["device-token auth", { authMethod: "device-token" }],
-    ["no device", { device: null }],
-  ])("requires pairing when %s", (_label, overrides) => {
-    expectSkipPairing({ ...base, ...overrides }, null);
-  });
-});

@@ -62,9 +62,29 @@ const qaSuiteScenarioIdentityDeps = {
   sleep,
   randomUUID,
   projectQaToolMessages,
-  ...suiteRuntimeAgentMedia,
-  ...suiteRuntimeAgentProcess,
-  ...suiteRuntimeAgentSession,
+  // YAML scenarios resolve these bindings by name; keep the registry statically visible.
+  ensureImageGenerationConfigured: suiteRuntimeAgentMedia.ensureImageGenerationConfigured,
+  extractMediaPathFromText: suiteRuntimeAgentMedia.extractMediaPathFromText,
+  resolveGeneratedImagePath: suiteRuntimeAgentMedia.resolveGeneratedImagePath,
+  findManagedDreamingCronJob: suiteRuntimeAgentProcess.findManagedDreamingCronJob,
+  forceMemoryIndex: suiteRuntimeAgentProcess.forceMemoryIndex,
+  listCronJobs: suiteRuntimeAgentProcess.listCronJobs,
+  readDoctorMemoryStatus: suiteRuntimeAgentProcess.readDoctorMemoryStatus,
+  runAgentPrompt: suiteRuntimeAgentProcess.runAgentPrompt,
+  startAgentRun: suiteRuntimeAgentProcess.startAgentRun,
+  waitForAgentHistory: suiteRuntimeAgentProcess.waitForAgentHistory,
+  waitForAgentHistoryReply: suiteRuntimeAgentProcess.waitForAgentHistoryReply,
+  waitForAgentRun: suiteRuntimeAgentProcess.waitForAgentRun,
+  createSession: suiteRuntimeAgentSession.createSession,
+  readEffectiveTools: suiteRuntimeAgentSession.readEffectiveTools,
+  readQaSessionTranscriptEvents: suiteRuntimeAgentSession.readQaSessionTranscriptEvents,
+  readRawQaSessionStore: suiteRuntimeAgentSession.readRawQaSessionStore,
+  readSessionToolActivity: suiteRuntimeAgentSession.readSessionToolActivity,
+  readSessionTranscriptSummary: suiteRuntimeAgentSession.readSessionTranscriptSummary,
+  readSkillStatus: suiteRuntimeAgentSession.readSkillStatus,
+  readSubagentHandoffReply: suiteRuntimeAgentSession.readSubagentHandoffReply,
+  seedQaSessionEntries: suiteRuntimeAgentSession.seedQaSessionEntries,
+  seedQaSessionTranscript: suiteRuntimeAgentSession.seedQaSessionTranscript,
   callPluginToolsMcp,
   findSkill,
   handleQaAction,
@@ -190,11 +210,10 @@ function createQaSuiteScenarioDeps(
     });
   const markLogs = params.env.gateway.markLogs;
   const readLogsSince = params.env.gateway.readLogsSince;
-  let monotonicGatewayLogs =
+  const monotonicGatewayLogs =
     typeof markLogs === "function" && typeof readLogsSince === "function"
       ? { mark: markLogs, readSince: readLogsSince }
       : undefined;
-  const fullLegacyGatewayLogSnapshotMark = -1;
   const readGatewayLogs = (mark?: number) => {
     if (monotonicGatewayLogs && isValidGatewayLogMark(mark)) {
       return monotonicGatewayLogs.readSince(mark);
@@ -216,32 +235,12 @@ function createQaSuiteScenarioDeps(
     webSnapshot: webRuntime.qaWebSnapshot,
     webEvaluate: webRuntime.qaWebEvaluate,
     readGatewayLogs,
-    markGatewayLogCursor: () => {
-      if (monotonicGatewayLogs) {
-        const mark = monotonicGatewayLogs.mark();
-        if (isValidGatewayLogMark(mark)) {
-          return mark;
-        }
-        monotonicGatewayLogs = undefined;
-        return fullLegacyGatewayLogSnapshotMark;
-      }
-      return fullLegacyGatewayLogSnapshotMark;
-    },
+    markGatewayLogCursor: () => monotonicGatewayLogs?.mark() ?? -1,
     scanGatewayLogSentinels: (options?: Parameters<typeof scanGatewayLogSentinels>[1]) =>
       scanGatewayLogSentinels(readGatewayLogs(options?.since), { ...options, since: 0 }),
     assertNoGatewayLogSentinels: (options?: Parameters<typeof assertNoGatewayLogSentinels>[1]) =>
       assertNoGatewayLogSentinels(readGatewayLogs(options?.since), { ...options, since: 0 }),
-    runRuntimeToolFixture: async (
-      envArg: QaSuiteScenarioFlowEnv,
-      configArg: Record<string, unknown>,
-    ) =>
-      runtimeToolFixture.runRuntimeToolFixture(envArg, configArg, {
-        createSession: suiteRuntimeAgentSession.createSession,
-        readEffectiveTools: suiteRuntimeAgentSession.readEffectiveTools,
-        runAgentPrompt: suiteRuntimeAgentProcess.runAgentPrompt,
-        fetchJson: suiteRuntimeGateway.fetchJson,
-        ensureImageGenerationConfigured: suiteRuntimeAgentMedia.ensureImageGenerationConfigured,
-      }),
+    runRuntimeToolFixture: runtimeToolFixture.runRuntimeToolFixture,
     formatErrorMessage: formatQaErrorMessage,
     liveTurnTimeoutMs: resolveQaLiveTurnTimeoutMs,
     resolveQaLiveTurnTimeoutMs,

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { asOptionalRecord as asRecord } from "@openclaw/normalization-core/record-coerce";
 import { containsAsciiControlCharacter } from "@openclaw/normalization-core/string-normalization";
+import { LruCache } from "../infra/lru-cache.js";
 import {
   COMMAND_PALETTE_SHORTCUTS,
   createKeyboardShortcutMatcher,
@@ -23,6 +24,8 @@ const SANDBOX_HOST_CSP_QUERY = "csp";
 const SANDBOX_HOST_CSP_MAX_JSON_BYTES = 5 * 1024;
 const SANDBOX_HOST_CSP_MAX_HEADER_BYTES = 6 * 1024;
 const SANDBOX_HOST_CSP_MAX_ENCODED_BYTES = Math.ceil(SANDBOX_HOST_CSP_MAX_JSON_BYTES / 3) * 4 + 4;
+// The complete policy keys immutable public URLs; shell code changes retire this process cache.
+const sandboxHostPaths = new LruCache<string>(64);
 
 function buildSandboxShortcutBridgeHtml(): string {
   return `<script>(()=>{
@@ -215,15 +218,19 @@ export function normalizeSandboxHostCsp(value: unknown): SandboxHostCsp | undefi
 
 export function buildSandboxHostPath(csp?: SandboxHostCsp): string {
   const normalized = normalizeSandboxHostCsp(csp);
+  const policy = normalized ? JSON.stringify(normalized) : "";
+  const cached = sandboxHostPaths.get(policy);
+  if (cached !== undefined) {
+    return cached;
+  }
   const query = new URLSearchParams();
   if (normalized) {
-    query.set(
-      SANDBOX_HOST_CSP_QUERY,
-      Buffer.from(JSON.stringify(normalized)).toString("base64url"),
-    );
+    query.set(SANDBOX_HOST_CSP_QUERY, Buffer.from(policy).toString("base64url"));
   }
   query.set("v", buildSandboxHostDocument(normalized).version);
-  return `${SANDBOX_HOST_PATH}?${query}`;
+  const pathname = `${SANDBOX_HOST_PATH}?${query}`;
+  sandboxHostPaths.set(policy, pathname);
+  return pathname;
 }
 
 /** Version the public shell and its security headers together, never widget content. */
@@ -295,6 +302,11 @@ function buildSandboxHostProxyHtml(csp?: SandboxHostCsp): string {
   return `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<script>
+  // Match the embedding frame before this document can paint an opaque UA canvas.
+  const initialTheme = new URLSearchParams(window.location.hash.slice(1)).get("theme");
+  if (initialTheme === "light" || initialTheme === "dark") document.documentElement.style.colorScheme = initialTheme;
+</script>
 <title>MCP App sandbox</title>
 <style>html,body{height:100%;margin:0;background:transparent}iframe{display:block;width:100%;height:100%;border:0;background:transparent}</style>
 <body>

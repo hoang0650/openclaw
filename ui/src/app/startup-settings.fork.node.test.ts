@@ -6,9 +6,9 @@ import {
   parseAimarketsUserId,
   parsePhhotelTenantHotelId,
   resolveAimarketsScopedSessionKey,
-  resolveApplicationStartupSettings,
   resolvePhhotelScopedSessionKey,
-} from "./startup-settings.ts";
+} from "./marketplace-session.ts";
+import { resolveApplicationStartupSettings } from "./startup-settings.ts";
 
 const HEX24 = "0123456789abcdef01234567";
 
@@ -31,7 +31,7 @@ describe("fork startup settings", () => {
     expect(startup.settings.gatewayUrl).toBe("wss://hotel.phhotel.vn");
     expect(startup.settings.token).toBe("gtok-123");
     expect(startup.password).toBe("gtok-123");
-    expect(startup.pendingGatewayUrl).toBeNull();
+    expect(startup.pendingGatewayUrl).toBe("wss://hotel.phhotel.vn");
     expect(startup.location.hash).not.toContain("token=");
     expect(startup.location.hash).not.toContain("password=");
     expect(startup.location.hash).not.toContain("autoConnect");
@@ -45,8 +45,7 @@ describe("fork startup settings", () => {
       hash: "",
     });
     expect(startup.settings.sessionKey).toBe(`hotel-${HEX24}`);
-    expect(startup.location.search).toContain(`session=hotel-${HEX24}`);
-    expect(startup.location.hash).toContain(`hotelId=${HEX24}`);
+    expect(startup.settings.lastActiveSessionKey).toBe(`hotel-${HEX24}`);
   });
 
   it("forces market session on {userId}.openclaw.aimarkets.vn, never a hotel session", () => {
@@ -62,8 +61,7 @@ describe("fork startup settings", () => {
       hash: "",
     });
     expect(startup.settings.sessionKey).toBe(`market-${HEX24}`);
-    expect(startup.location.hash).toContain(`userId=${HEX24}`);
-    expect(startup.location.hash).not.toContain("hotelId=");
+    expect(startup.settings.lastActiveSessionKey).toBe(`market-${HEX24}`);
   });
 
   it("accepts base64 #config= payload aliases", () => {

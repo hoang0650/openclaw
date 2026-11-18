@@ -245,6 +245,29 @@ describe("resolveAuthHintKind", () => {
       }),
     ).toBe("failed");
   });
+
+  it("treats a gateway token failure as auth even when the frame code is generic", () => {
+    expect(
+      resolveAuthHintKind({
+        connected: false,
+        lastError:
+          "unauthorized: gateway token missing (paste in Control UI settings or openclaw doctor --generate-gateway-token; restart)",
+        lastErrorCode: "INVALID_REQUEST",
+        hasToken: true,
+        hasPassword: false,
+      }),
+    ).toBe("required");
+    expect(
+      resolveAuthHintKind({
+        connected: false,
+        lastError:
+          "unauthorized: gateway token mismatch (open the dashboard URL and paste the token in Control UI settings)",
+        lastErrorCode: "INVALID_REQUEST",
+        hasToken: true,
+        hasPassword: false,
+      }),
+    ).toBe("failed");
+  });
 });
 
 describe("shouldShowInsecureContextHint", () => {

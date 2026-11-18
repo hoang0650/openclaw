@@ -1,10 +1,11 @@
 import { isValidWorkboardBoardId } from "@openclaw/workboard-contract";
 import type { RouteId } from "./app-route-paths.ts";
+import { resolveOpenClawAudience } from "./app/audience-models.ts";
 import type {
   NativeDeviceSettingsCapability,
   NativeDeviceSettingsSnapshot,
 } from "./app/native-device-settings.ts";
-import type { IconName } from "./components/icons.ts";
+import type { IconName } from "./components/icon-data.ts";
 import { t } from "./i18n/index.ts";
 
 export type NavigationRouteId = RouteId;
@@ -167,6 +168,7 @@ const SETTINGS_NAVIGATION_GROUPS = [
     labelKey: "nav.settingsGroupAgents",
     routes: [
       "agents",
+      "my-api-keys",
       "model-providers",
       "search",
       "plugin-settings",
@@ -187,8 +189,6 @@ const SETTINGS_NAVIGATION_GROUPS = [
 ] as const satisfies readonly SettingsNavigationGroup[];
 
 const NON_ADMIN_SETTINGS_ROUTES: ReadonlySet<NavigationRouteId> = new Set([
-  // Fork (AI Markets): buyers manage their own BYOK provider keys.
-  "my-api-keys",
   "profile",
   "appearance",
   "notifications",
@@ -197,6 +197,7 @@ const NON_ADMIN_SETTINGS_ROUTES: ReadonlySet<NavigationRouteId> = new Set([
   "talk",
   "devices",
   "agents",
+  "my-api-keys",
   "model-providers",
   "search",
   "plugin-settings",
@@ -225,6 +226,9 @@ export function isSettingsNavigationRouteVisible(
         snapshot.permissions.location ||
         snapshot.capabilities?.activeComputerPresenceEnabled !== undefined),
     );
+  }
+  if (routeId === "my-api-keys") {
+    return resolveOpenClawAudience() === "aimarkets";
   }
   if (routeId === "updates") {
     return canAdmin || nativeDeviceSettings !== null;
@@ -277,15 +281,7 @@ const SETTINGS_SUBPAGE_ROUTES: readonly NavigationRouteId[] = [
   "ai-agents",
   "model-setup",
   "lobsterdex",
-  "my-api-keys",
 ];
-
-// Audience-specific sidebar entries appended to an existing group. AI Markets
-// buyers bring their own provider keys; other surfaces never show the page.
-export const AIMARKETS_SETTINGS_ROUTES: readonly {
-  groupLabelKey: string;
-  routeId: NavigationRouteId;
-}[] = [{ groupLabelKey: "nav.settingsGroupAgents", routeId: "my-api-keys" }];
 export const SETTINGS_SEARCHABLE_SUBPAGE_ROUTES: readonly NavigationRouteId[] = ["ai-agents"];
 
 const SETTINGS_NAVIGATION_ROUTES: ReadonlySet<NavigationRouteId> = new Set([
@@ -300,6 +296,7 @@ function navigationPresentation(icon: IconName, key: string): NavigationPresenta
 const NAVIGATION_PRESENTATION: Record<NavigationRouteId, NavigationPresentation> = {
   settings: ["settings", "nav.settings", "common.settingsSections"],
   "agents-home": navigationPresentation("bot", "agentsHome"),
+  claws: navigationPresentation("bot", "claws"),
   agents: navigationPresentation("bot", "agents"),
   activity: navigationPresentation("activity", "activity"),
   meetings: navigationPresentation("book", "meetings"),
@@ -345,7 +342,7 @@ const NAVIGATION_PRESENTATION: Record<NavigationRouteId, NavigationPresentation>
   "ai-agents": navigationPresentation("brain", "aiAgents"),
   "model-setup": navigationPresentation("spark", "modelSetup"),
   "model-providers": ["box", "routeTitles.modelProviders", "subtitles.modelProviders"],
-  "my-api-keys": navigationPresentation("key", "myApiKeys"),
+  "my-api-keys": ["key", "tabs.myApiKeys", "subtitles.myApiKeys"],
   "memory-import": navigationPresentation("download", "memoryImport"),
   notifications: ["bell", "routeTitles.notifications", "subtitles.notifications"],
   security: navigationPresentation("shieldCheck", "security"),
@@ -374,23 +371,17 @@ export function titleForRoute(routeId: NavigationRouteId, translate = t): string
   return translate(titleKey);
 }
 
-/** Window/tab title, markers leftmost because tabs truncate from the right.
- * A disconnected Gateway replaces the approval count (a stale queue is not
- * actionable); titles already ending in the brand
- * ("Ask OpenClaw") skip the suffix so it never reads "… OpenClaw — OpenClaw". */
+/** Window/tab title, attention leftmost because tabs truncate from the right.
+ * Titles already ending in the brand skip the suffix to avoid duplication. */
 export function formatDocumentTitle(options: {
   context: string;
   attentionCount?: number;
   brandName?: string;
-  gatewayDisconnected?: boolean;
 }): string {
   const brandName = options.brandName ?? "OpenClaw";
   const base = options.context.endsWith(brandName)
     ? options.context
     : `${options.context} — ${brandName}`;
-  if (options.gatewayDisconnected) {
-    return `(${t("connection.disconnectedTitle")}) ${base}`;
-  }
   if (options.attentionCount && options.attentionCount > 0) {
     return `(${options.attentionCount}) ${base}`;
   }

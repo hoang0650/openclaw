@@ -244,23 +244,31 @@ class MyApiKeysPage extends OpenClawLightDomElement {
     const canSave = !busy && (Boolean(draft.apiKey.trim()) || customEndpointChanged);
     const description = html`
       ${this.renderStatus(saved)}
-      ${saved?.lastVerifiedAt
-        ? html` ·
-          ${t("myApiKeysPage.verifiedAt", {
-            time: new Date(saved.lastVerifiedAt).toLocaleString(),
-          })}`
-        : nothing}
-      ${models.length > 0
-        ? html`<br />${t("myApiKeysPage.modelsHint", { models: models.join(", ") })}`
-        : nothing}
-      ${provider.keyUrl
-        ? html`<br />${renderDocsLink(provider.keyUrl, t("myApiKeysPage.getKey"))}`
-        : nothing}
-      ${notice
-        ? html`<br /><span role=${notice.kind === "danger" ? "alert" : "status"}
-              >${renderSettingsStatus({ kind: notice.kind, label: notice.text })}</span
-            >`
-        : nothing}
+      ${
+        saved?.lastVerifiedAt
+          ? html` ·
+            ${t("myApiKeysPage.verifiedAt", {
+              time: new Date(saved.lastVerifiedAt).toLocaleString(),
+            })}`
+          : nothing
+      }
+      ${
+        models.length > 0
+          ? html`<br />${t("myApiKeysPage.modelsHint", { models: models.join(", ") })}`
+          : nothing
+      }
+      ${
+        provider.keyUrl
+          ? html`<br />${renderDocsLink(provider.keyUrl, t("myApiKeysPage.getKey"))}`
+          : nothing
+      }
+      ${
+        notice
+          ? html`<br /><span role=${notice.kind === "danger" ? "alert" : "status"}
+                >${renderSettingsStatus({ kind: notice.kind, label: notice.text })}</span
+              >`
+          : nothing
+      }
     `;
     return html`
       ${renderSettingsRow({
@@ -278,40 +286,42 @@ class MyApiKeysPage extends OpenClawLightDomElement {
               }
             }}
           >
-            ${provider.custom
-              ? html`
-                  <input
-                    class="settings-input"
-                    type="url"
-                    inputmode="url"
-                    autocomplete="off"
-                    spellcheck="false"
-                    aria-label=${t("myApiKeysPage.baseUrl")}
-                    title=${t("myApiKeysPage.baseUrlHint")}
-                    placeholder=${t("myApiKeysPage.baseUrlPlaceholder")}
-                    .value=${draft.baseUrl}
-                    ?disabled=${Boolean(busy)}
-                    @input=${(event: Event) =>
-                      this.updateDraft(provider.id, {
-                        baseUrl: (event.currentTarget as HTMLInputElement).value,
-                      })}
-                  />
-                  <input
-                    class="settings-input"
-                    type="text"
-                    autocomplete="off"
-                    spellcheck="false"
-                    aria-label=${t("myApiKeysPage.model")}
-                    placeholder=${t("myApiKeysPage.modelPlaceholder")}
-                    .value=${draft.model}
-                    ?disabled=${Boolean(busy)}
-                    @input=${(event: Event) =>
-                      this.updateDraft(provider.id, {
-                        model: (event.currentTarget as HTMLInputElement).value,
-                      })}
-                  />
-                `
-              : nothing}
+            ${
+              provider.custom
+                ? html`
+                    <input
+                      class="settings-input"
+                      type="url"
+                      inputmode="url"
+                      autocomplete="off"
+                      spellcheck="false"
+                      aria-label=${t("myApiKeysPage.baseUrl")}
+                      title=${t("myApiKeysPage.baseUrlHint")}
+                      placeholder=${t("myApiKeysPage.baseUrlPlaceholder")}
+                      .value=${draft.baseUrl}
+                      ?disabled=${Boolean(busy)}
+                      @input=${(event: Event) =>
+                        this.updateDraft(provider.id, {
+                          baseUrl: (event.currentTarget as HTMLInputElement).value,
+                        })}
+                    />
+                    <input
+                      class="settings-input"
+                      type="text"
+                      autocomplete="off"
+                      spellcheck="false"
+                      aria-label=${t("myApiKeysPage.model")}
+                      placeholder=${t("myApiKeysPage.modelPlaceholder")}
+                      .value=${draft.model}
+                      ?disabled=${Boolean(busy)}
+                      @input=${(event: Event) =>
+                        this.updateDraft(provider.id, {
+                          model: (event.currentTarget as HTMLInputElement).value,
+                        })}
+                    />
+                  `
+                : nothing
+            }
             ${renderSettingsSecretInput({
               ariaLabel: `${provider.label} ${t("myApiKeysPage.apiKey")}`,
               value: draft.apiKey,
@@ -329,26 +339,28 @@ class MyApiKeysPage extends OpenClawLightDomElement {
               <button type="submit" class="btn btn--sm primary" ?disabled=${!canSave}>
                 ${busy === "save" ? t("myApiKeysPage.saving") : t("myApiKeysPage.save")}
               </button>
-              ${saved
-                ? html`
-                    <button
-                      type="button"
-                      class="btn btn--sm"
-                      ?disabled=${Boolean(busy)}
-                      @click=${() => this.test(provider)}
-                    >
-                      ${busy === "test" ? t("myApiKeysPage.testing") : t("myApiKeysPage.test")}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn--sm danger"
-                      ?disabled=${Boolean(busy)}
-                      @click=${() => this.removeKey(provider)}
-                    >
-                      ${busy === "remove" ? t("myApiKeysPage.removing") : t("myApiKeysPage.remove")}
-                    </button>
-                  `
-                : nothing}
+              ${
+                saved
+                  ? html`
+                      <button
+                        type="button"
+                        class="btn btn--sm"
+                        ?disabled=${Boolean(busy)}
+                        @click=${() => this.test(provider)}
+                      >
+                        ${busy === "test" ? t("myApiKeysPage.testing") : t("myApiKeysPage.test")}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn--sm danger"
+                        ?disabled=${Boolean(busy)}
+                        @click=${() => this.removeKey(provider)}
+                      >
+                        ${busy === "remove" ? t("myApiKeysPage.removing") : t("myApiKeysPage.remove")}
+                      </button>
+                    `
+                  : nothing
+              }
             </div>
           </form>
         `,
@@ -376,8 +388,10 @@ class MyApiKeysPage extends OpenClawLightDomElement {
         ${renderIntro(t("myApiKeysPage.intro"))}
         ${renderSettingsSection(
           { title: t("myApiKeysPage.noTicketTitle") },
-          renderSettingsEmpty(html`${t("myApiKeysPage.noTicketBody")}
-          ${renderDocsLink("https://aimarkets.vn", "aimarkets.vn")}`),
+          renderSettingsEmpty(
+            html`${t("myApiKeysPage.noTicketBody")}
+            ${renderDocsLink("https://aimarkets.vn", "aimarkets.vn")}`,
+          ),
         )}
       `);
     }

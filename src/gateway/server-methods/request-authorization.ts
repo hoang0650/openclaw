@@ -1,4 +1,5 @@
 import { isPromiseLike } from "@openclaw/normalization-core/promise-like";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   ErrorCodes,
   errorShape,
@@ -25,15 +26,28 @@ import {
   listAgentDatabaseAdmissionRefusals,
   readAgentDatabaseAdmissionRefusal,
 } from "../../state/agent-database-admission.js";
-import { checkAimarketsSessionAccess, isAimarketsTicketEnforced } from "../aimarkets-ticket.js";
+import {
+  aimarketsBuyerMethodRequiresSession,
+  checkAimarketsBuyerMethodAccess,
+  checkAimarketsSessionAccess,
+  isAimarketsTicketEnforced,
+} from "../aimarkets-ticket.js";
+import { readChatInputRecoveryAdmission } from "../chat-input-recovery-source.js";
 import type { ExpectedProfileBinding } from "../expected-profile.js";
 import type { GatewayMethodRegistryView } from "../methods/descriptor.js";
 import {
   prepareGatewaySessionAccessAuthority,
   type GatewaySessionAccessAuthority,
 } from "../session-access-authority.js";
-import { sessionMutationTargetFields } from "../session-method-policy.js";
-import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
+import {
+  isAgentRunStartMethod,
+  isDirectSessionReadMethod,
+  sessionMutationTargetFields,
+} from "../session-method-policy.js";
+import {
+  resolveRequestedSessionAgentId,
+  resolveSessionCreateAgentId,
+} from "../session-request-agent.js";
 import type { SessionRowReadView } from "../session-row-prepared-read.js";
 import { getSessionRowProjection } from "../session-row-projection-access.js";
 import { resolveSessionMutationAuthorizationAsync } from "../session-sharing-authorization-async.js";
@@ -43,6 +57,7 @@ import {
   resolveChatSendAuthorizationParams,
   resolveDirectIncognitoTargets,
   resolveDirectSessionTargets,
+  resolveSessionMutationTargets,
 } from "../session-sharing-target-input.js";
 import { isGatewayAdmin, SessionMutationAuthorizationChangedError } from "../session-sharing.js";
 import type { SessionSubscribePhase } from "../slow-request-diagnostics.js";
@@ -63,6 +78,54 @@ const startupReadMethods = new Set([
   "sessions.describe",
   "models.list",
 ]);
+
+function startupWriteAgents(
+  params: { method: string; requestParams: unknown; context: GatewayRequestContext },
+  cfg: OpenClawConfig,
+) {
+  const refusals = listAgentDatabaseAdmissionRefusals();
+  const targets = resolveSessionMutationTargets(params) ?? [];
+  const selected = targets.map((target) =>
+    resolveRequestedSessionAgentId(cfg, target.sessionKey, target.agentId),
+  );
+  if (params.method === "sessions.create") {
+    selected.push(
+      resolveSessionCreateAgentId(cfg, {
+        key: readSessionSharingStringParam(params.requestParams, "key"),
+        agentId: readSessionSharingStringParam(params.requestParams, "agentId"),
+        parentSessionKey: readSessionSharingStringParam(params.requestParams, "parentSessionKey"),
+      }),
+    );
+  } else if (params.method === "agent" && targets.length === 0) {
+    selected.push(
+      resolveRequestedSessionAgentId(
+        cfg,
+        undefined,
+        readSessionSharingStringParam(params.requestParams, "agentId"),
+      ),
+    );
+  }
+  return [
+    ...new Set(
+      selected.flatMap((result) =>
+        result.ok
+          ? [result.agentId]
+          : refusals
+              .filter((refusal) => refusal === result.error.details)
+              .map(({ agentId }) => agentId),
+      ),
+    ),
+  ];
+}
+
+function startupWriteRefusal(agents: string[]) {
+  const refusals = agents
+    .map((agentId) => readAgentDatabaseAdmissionRefusal(agentId))
+    .filter((refusal) => refusal !== undefined);
+  return (
+    refusals.find((refusal) => refusal.code !== "agent-database-inspection-pending") ?? refusals[0]
+  );
+}
 
 function startupReadAgents(method: string, requestParams: unknown, cfg: OpenClawConfig) {
   const refusals = listAgentDatabaseAdmissionRefusals();
@@ -99,6 +162,14 @@ async function prepareStartupReadAgents(
   if (method === "models.list" && !readSessionSharingStringParam(requestParams, "sessionKey")) {
     return agents;
   }
+  return prepareStartupAgentTargets(agents, cfg, signal);
+}
+
+async function prepareStartupAgentTargets(
+  agents: string[],
+  cfg: OpenClawConfig,
+  signal: AbortSignal,
+) {
   const targets = await Promise.all(
     agents.map((agentId) =>
       prepareSqliteTargetFromSessionStorePath(
@@ -146,6 +217,18 @@ export async function authorizeGatewayRequestPreDispatch(params: {
     : undefined;
   let startupReadSignal: AbortSignal | undefined;
   let startupReadDeadline: number | undefined;
+  const buyerMethodError = checkAimarketsBuyerMethodAccess({
+    method: params.method,
+    clientUserId: params.client?.aimarketsUserId,
+    internal: Boolean(params.client?.internal),
+  });
+  if (buyerMethodError) {
+    return {
+      error: errorShape(ErrorCodes.FORBIDDEN, buyerMethodError, {
+        details: { code: "AIMARKETS_METHOD_FORBIDDEN" },
+      }),
+    };
+  }
   let startupReadResult: { cfg: OpenClawConfig; agents?: string[]; timedOut: boolean } | undefined;
   signal?.throwIfAborted();
   if (params.context.ensureSessionRowProjection) {
@@ -153,21 +236,27 @@ export async function authorizeGatewayRequestPreDispatch(params: {
     await params.context.ensureSessionRowProjection();
   }
   params.markSessionSubscribePhase?.("accessFacts");
+  // SAFETY: The host-owned method registry carries the PluginRegistry selected for dispatch.
+  const pluginRegistry = params.methodRegistry.pluginRegistry as PluginRegistry | undefined;
   const authorizeMethod = () =>
-    withPluginRuntimeRegistryScope(
-      // SAFETY: The host-owned method registry carries the PluginRegistry selected for dispatch.
-      params.methodRegistry.pluginRegistry as PluginRegistry | undefined,
-      () =>
-        authorizeGatewayMethod(
-          params.method,
-          params.client,
-          params.requestParams,
-          params.methodRegistry,
-          params.context,
-        ),
+    withPluginRuntimeRegistryScope(pluginRegistry, () =>
+      authorizeGatewayMethod(
+        params.method,
+        params.client,
+        params.requestParams,
+        params.methodRegistry,
+        params.context,
+      ),
     );
   const startupError = () =>
-    params.context.unavailableGatewayMethods?.has(params.method)
+    params.context.unavailableGatewayMethods?.has(params.method) &&
+    // Only the recovery owner's exact saved request can enter before fresh chat.
+    !(
+      params.method === "chat.send" &&
+      isRecord(params.requestParams) &&
+      typeof params.requestParams.idempotencyKey === "string" &&
+      readChatInputRecoveryAdmission(params.requestParams.idempotencyKey)
+    )
       ? errorShape(ErrorCodes.UNAVAILABLE, `${params.method} unavailable during gateway startup`, {
           retryable: true,
           retryAfterMs: GATEWAY_STARTUP_RETRY_AFTER_MS,
@@ -181,20 +270,6 @@ export async function authorizeGatewayRequestPreDispatch(params: {
     const scopeAuthorization = authorizeMethod();
     if (scopeAuthorization.error) {
       return { error: scopeAuthorization.error };
-    }
-    // Fork (AI Markets): per-buyer session isolation for ticketed WS clients.
-    if (params.client && !params.client.internal && isAimarketsTicketEnforced()) {
-      const aimarketsError = checkAimarketsSessionAccess({
-        requestParams: params.requestParams,
-        clientUserId: params.client.aimarketsUserId,
-      });
-      if (aimarketsError) {
-        return {
-          error: errorShape(ErrorCodes.INVALID_REQUEST, aimarketsError, {
-            details: { code: "AIMARKETS_SESSION_FORBIDDEN" },
-          }),
-        };
-      }
     }
     const uploadError = gatewayRouterUploadPolicyError(params, params.methodRegistry);
     if (uploadError) {
@@ -231,6 +306,55 @@ export async function authorizeGatewayRequestPreDispatch(params: {
     if (unavailableError) {
       return { error: unavailableError };
     }
+    if (
+      params.method === "send" &&
+      !readSessionSharingStringParam(params.requestParams, "sessionKey")
+    ) {
+      const agentId = readSessionSharingStringParam(params.requestParams, "agentId");
+      const selected = resolveRequestedSessionAgentId(
+        params.context.getRuntimeConfig(),
+        agentId ? undefined : "main",
+        agentId,
+      );
+      if (!selected.ok) {
+        const error = selected.error;
+        if (error.retryable) {
+          error.details = { ...gatewayStartupUnavailableDetails(), method: params.method };
+        }
+        return { error };
+      }
+    }
+    if (
+      params.context.agentDatabaseStartup?.hasPendingAgents &&
+      params.methodRegistry.getScope(params.method) !== "operator.read" &&
+      !params.methodRegistry.isObservation(params.method) &&
+      !isDirectSessionReadMethod(params.method)
+    ) {
+      const waitSignal = AbortSignal.any(
+        [params.signal, params.client?.connectionSignal, getAsyncWorkSignal()].filter(
+          (candidate): candidate is AbortSignal => candidate !== undefined,
+        ),
+      );
+      const cfg = params.context.getRuntimeConfig();
+      let agents = startupWriteAgents(params, cfg);
+      let refusal = startupWriteRefusal(agents);
+      if (!refusal && !isPerAgentSessionStoreConfig(cfg.session?.store)) {
+        agents = await prepareStartupAgentTargets(agents, cfg, waitSignal);
+        if (params.context.getRuntimeConfig() !== cfg) {
+          continue;
+        }
+        refusal = startupWriteRefusal(agents);
+      }
+      if (refusal) {
+        const error = createAgentDatabaseAdmissionErrorShape(refusal);
+        if (error.retryable && !params.consumeSessionTurn) {
+          // Only initial dispatch proves no handler work occurred. A client may safely
+          // resend this refusal, but must never time out a write parked on readiness.
+          error.details = { ...gatewayStartupUnavailableDetails(), method: params.method };
+        }
+        return { error };
+      }
+    }
     const startup =
       startupReadMethods.has(params.method) &&
       (params.method !== "sessions.list" ||
@@ -253,11 +377,11 @@ export async function authorizeGatewayRequestPreDispatch(params: {
         if (remainingMs <= 0) {
           const agents =
             previous?.agents ?? startupReadAgents(params.method, params.requestParams, cfg);
-          const refusal = agents
+          const physicalRefusal = agents
             .map((agentId) => readAgentDatabaseAdmissionRefusal(agentId))
             .find(Boolean);
-          if (refusal) {
-            return { error: createAgentDatabaseAdmissionErrorShape(refusal) };
+          if (physicalRefusal) {
+            return { error: createAgentDatabaseAdmissionErrorShape(physicalRefusal) };
           }
           if (!previous?.agents) {
             return {
@@ -347,6 +471,40 @@ export async function authorizeGatewayRequestPreDispatch(params: {
       }
       assertChatRoutingCurrent();
       requestParams = normalized.value;
+    }
+    // The target owner, not a user-chosen name alone, decides buyer credential scope.
+    // Missing run targets must not select the operator's global/default session.
+    if (
+      params.client &&
+      (params.client.aimarketsUserId ||
+        (!params.client.internal && isAimarketsTicketEnforced()))
+    ) {
+      const targets = [
+        ...resolveDirectSessionTargets(params.method, requestParams),
+        ...(resolveSessionMutationTargets({ ...params, requestParams }) ?? []),
+      ];
+      if (params.method === "sessions.create") {
+        const key = readSessionSharingStringParam(requestParams, "key");
+        if (key) targets.push({ sessionKey: key });
+      }
+      const message = checkAimarketsSessionAccess({
+        requestParams,
+        clientUserId: params.client.aimarketsUserId,
+        sessionKeys: targets.map((target) => target.sessionKey),
+        requireSessionTarget:
+          Boolean(
+            params.client.aimarketsUserId && aimarketsBuyerMethodRequiresSession(params.method),
+          ) ||
+          isAgentRunStartMethod(params.method, requestParams) ||
+          params.method === "sessions.create",
+      });
+      if (message) {
+        return {
+          error: errorShape(ErrorCodes.FORBIDDEN, message, {
+            details: { code: "AIMARKETS_SESSION_FORBIDDEN" },
+          }),
+        };
+      }
     }
     const projection =
       !sessionPolicy &&
@@ -457,7 +615,7 @@ export async function authorizeGatewayRequestPreDispatch(params: {
       params.markSessionSubscribePhase?.(
         subscriptionAccessOnly ? "accessFacts" : "projectionReadiness",
       );
-      const preparedSessionMutation =
+      const sessionMutation =
         projection && params.consumeSessionTurn && !subscriptionAccessOnly
           ? await projection.withPreparedExactRows((cfg) => {
               signal?.throwIfAborted();
@@ -471,20 +629,9 @@ export async function authorizeGatewayRequestPreDispatch(params: {
                 return agent.ok ? [{ key: target.sessionKey, agentId: agent.agentId }] : [];
               });
             }, authorizeSessionAndConsume)
-          : { kind: "complete" as const, value: authorizeSessionAndConsume() };
+          : authorizeSessionAndConsume();
       params.markSessionSubscribePhase?.("accessFacts");
       signal?.throwIfAborted();
-      if (preparedSessionMutation.kind === "pending") {
-        workerSessionMutation.authorization?.release?.();
-        const { certifySessionCanonicalValidationPending } =
-          await import("../../config/sessions/session-canonical-validation-readiness.js");
-        signal?.throwIfAborted();
-        await certifySessionCanonicalValidationPending(preparedSessionMutation.database);
-        // No permission result survives readiness. Method scopes, profile binding,
-        // startup state, target selection and current session facts all run again.
-        continue;
-      }
-      const sessionMutation = preparedSessionMutation.value;
       if (sessionMutation.error) {
         workerSessionMutation.authorization?.release?.();
         return { error: sessionMutation.error };
@@ -498,6 +645,10 @@ export async function authorizeGatewayRequestPreDispatch(params: {
         try {
           const preparedAccess = await prepareGatewaySessionAccessAuthority({
             policy: sessionPolicy,
+            methodOwner: params.methodRegistry
+              .descriptors()
+              .find((descriptor) => descriptor.name === params.method)?.owner,
+            pluginRegistry,
             requestParams: params.requestParams,
             client: params.client ?? null,
             context: params.context,

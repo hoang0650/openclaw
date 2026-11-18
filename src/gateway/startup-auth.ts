@@ -1,4 +1,3 @@
-// Gateway startup auth preparation.
 // Merges auth overrides, resolves secret refs, validates weak secrets, and generates fallbacks.
 import crypto from "node:crypto";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
@@ -21,14 +20,7 @@ import {
   getTrustedProxyPasswordRedactionWarning,
 } from "./known-weak-gateway-secrets.js";
 
-const HOOKS_GATEWAY_AUTH_REUSE_WARNING =
-  "Security warning: hooks.token matches active Gateway shared-secret auth. Startup continues for compatibility; rotate hooks.token or Gateway auth. Run openclaw security audit for a full report, and run openclaw doctor --fix when the reused hooks.token is persisted in config.";
-
-/**
- * Fork (PHHotel/AI Markets): derive a stable gateway token from deployment
- * secrets so every restart/replica shares one token instead of a random one.
- */
-export function deriveStableGatewayTokenFromEnv(env: NodeJS.ProcessEnv): string | undefined {
+function deriveStableGatewayTokenFromEnv(env: NodeJS.ProcessEnv): string | undefined {
   const seedCandidates = [
     trimToUndefined(env.OPENCLAW_GATEWAY_TOKEN_SEED),
     trimToUndefined(env.NEST_SERVICE_AUTH_SECRET),
@@ -44,6 +36,9 @@ export function deriveStableGatewayTokenFromEnv(env: NodeJS.ProcessEnv): string 
     .digest("hex")
     .slice(0, 48);
 }
+
+const HOOKS_GATEWAY_AUTH_REUSE_WARNING =
+  "Security warning: hooks.token matches active Gateway shared-secret auth. Startup continues for compatibility; rotate hooks.token or Gateway auth. Run openclaw security audit for a full report, and run openclaw doctor --fix when the reused hooks.token is persisted in config.";
 
 /** Merge sparse runtime Tailscale overrides into persisted Gateway Tailscale config. */
 export function mergeGatewayTailscaleConfig(

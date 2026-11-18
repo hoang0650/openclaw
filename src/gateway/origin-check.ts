@@ -1,11 +1,9 @@
 import type { IncomingMessage } from "node:http";
 import net from "node:net";
-import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeOptionalLowercaseString,
-} from "@openclaw/normalization-core/string-coerce";
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { resolveControlUiAllowedOrigins } from "../config/gateway-control-ui-origins.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { normalizeLowercaseStringSet } from "../shared/normalized-string-set.js";
 import { getHeader } from "./http-header-value.js";
 import {
   getRemoteControlUiIngressContext,
@@ -22,6 +20,7 @@ import type {
   GatewayWsBrowserOrigin,
   RemoteControlUiIngressContext,
 } from "./server/client-identity-types.js";
+import { tenantHostnameFromHeader, tenantIdFromHost } from "./tenant-gateway-token.js";
 
 export function checkGatewayWsBrowserOrigin(origin: GatewayWsBrowserOrigin, cfg: OpenClawConfig) {
   return checkBrowserOrigin({
@@ -53,9 +52,15 @@ export function resolveBrowserOriginPolicy(params: {
   req: IncomingMessage;
   cfg?: OpenClawConfig;
 }): BrowserOriginPolicy {
+  const forwardedHost = getHeader(params.req, "x-forwarded-host");
+  const host = getHeader(params.req, "host");
   return {
     remoteControlUiIngress: getRemoteControlUiIngressContext(params.req),
-    requestHost: getHeader(params.req, "host"),
+    requestHost:
+      tenantHostnameFromHeader(forwardedHost) ??
+      tenantHostnameFromHeader(host) ??
+      forwardedHost?.split(",")[0]?.trim() ??
+      host,
     origin: getHeader(params.req, "origin"),
     fetchSite: getHeader(params.req, "sec-fetch-site"),
     allowedOrigins: resolveControlUiAllowedOrigins(params.cfg),
@@ -101,7 +106,7 @@ export function isGatewayHostBrowserOrigin(params: {
 }
 
 function normalizeAllowlistedOrigin(originRaw?: string): string | null {
-  const normalized = normalizeOptionalLowercaseString(originRaw);
+  const normalized = normalizeLowercaseStringOrEmpty(originRaw);
   if (!normalized) {
     return null;
   }
@@ -139,16 +144,17 @@ export function checkBrowserOrigin(params: {
     return { ok: false, reason: "origin missing or invalid" };
   }
 
-  const allowlist = new Set(
-    (params.allowedOrigins ?? [])
-      .map((value) => normalizeAllowlistedOrigin(value))
-      .filter(Boolean),
+  const allowlist = normalizeLowercaseStringSet(
+    (params.allowedOrigins ?? []).map((value) => normalizeAllowlistedOrigin(value) ?? ""),
   );
   if (allowlist.has("*") || allowlist.has(parsedOrigin.origin)) {
     return { ok: true, matchedBy: "allowlist" };
   }
 
   const requestHost = normalizeHostHeader(params.requestHost);
+  if (requestHost && parsedOrigin.host === requestHost && tenantIdFromHost(requestHost)) {
+    return { ok: true, matchedBy: "host-header-fallback" };
+  }
   if (
     params.allowHostHeaderOriginFallback === true &&
     requestHost &&

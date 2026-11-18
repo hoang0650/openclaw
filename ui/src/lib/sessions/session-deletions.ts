@@ -4,6 +4,12 @@ import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../format-error.ts";
 import { showToast } from "../toast.ts";
 import type { readSessionChangedEvent } from "./reconcile.ts";
+import {
+  normalizeAgentId,
+  resolveUiConversationIdentity,
+  resolveUiSelectedGlobalAgentId,
+} from "./session-key.ts";
+import { requestSessionDelete, requestSessionPatch } from "./session-requests.ts";
 import type {
   SessionConnectionOwner,
   SessionDeleteBatchResult,
@@ -14,13 +20,7 @@ import type {
   SessionListScope,
   SessionRefreshOutcome,
   SessionState,
-} from "./session-capability.ts";
-import {
-  normalizeAgentId,
-  resolveUiConversationIdentity,
-  resolveUiSelectedGlobalAgentId,
-} from "./session-key.ts";
-import { requestSessionDelete, requestSessionPatch } from "./session-requests.ts";
+} from "./session-types.ts";
 
 type Deletion = {
   target: SessionDeleteTarget;
@@ -55,8 +55,6 @@ type DeletionHost = {
     agentId?: string | null,
   ) => Promise<boolean>;
   retire: (key: string) => void;
-  /** Fork: hello auth, used to pick archive-then-delete for write-scoped operators. */
-  readAuth?: () => { role?: string; scopes?: readonly string[] } | null;
 };
 
 export function createSessionDeletions(host: DeletionHost) {
@@ -67,7 +65,7 @@ export function createSessionDeletions(host: DeletionHost) {
     const snapshot = host.snapshot();
     const selectedAgentId = resolveUiSelectedGlobalAgentId(snapshot);
     return (key: string, agentId?: string | null) => {
-      const canonical = resolveUiConversationIdentity(snapshot, key, agentId ?? undefined);
+      const canonical = resolveUiConversationIdentity(snapshot, key, agentId);
       return `${canonical.sessionKey}\0${canonical.agentId ?? normalizeAgentId(agentId ?? selectedAgentId)}`;
     };
   };
@@ -182,40 +180,6 @@ export function createSessionDeletions(host: DeletionHost) {
     }
     publish(deletion);
   };
-  // Fork: write-scoped (non-admin) Control UI devices can only delete archived
-  // sessions, so they archive first. Explicit archivedOnly keeps upstream
-  // semantics (caller already archived); unknown auth keeps a plain delete.
-  const shouldArchiveBeforeDelete = (target: SessionDeleteTarget): boolean => {
-    if (target.archivedOnly !== undefined || target.alreadyArchived === true) {
-      return false;
-    }
-    const auth = host.readAuth?.();
-    return Boolean(auth && hasOperatorWriteAccess(auth) && !hasOperatorAdminAccess(auth));
-  };
-  const prepareAndDeleteSession = (
-    client: NonNullable<ReturnType<SessionConnectionOwner["capture"]>>["client"],
-    target: SessionDeleteTarget,
-  ) => {
-    const { alreadyArchived, ...deleteOptions } = target;
-    if (alreadyArchived === true && target.archivedOnly === undefined) {
-      return requestSessionDelete(client, target.key, { ...deleteOptions, archivedOnly: true });
-    }
-    if (!shouldArchiveBeforeDelete(target)) {
-      // Same request (and timing) as upstream.
-      return requestSessionDelete(client, target.key, deleteOptions);
-    }
-    return requestSessionPatch(
-      client,
-      target.key,
-      { archived: true },
-      {
-        agentId: target.agentId,
-        ...(target.expectedSessionId ? { expectedSessionId: target.expectedSessionId } : {}),
-      },
-    ).then(() =>
-      requestSessionDelete(client, target.key, { ...deleteOptions, archivedOnly: true }),
-    );
-  };
   const perform = (
     deletion: Deletion,
     scope: NonNullable<ReturnType<SessionConnectionOwner["capture"]>>,
@@ -226,7 +190,27 @@ export function createSessionDeletions(host: DeletionHost) {
     const { target } = deletion;
     deletion.operation = (async () => {
       try {
-        const response = await prepareAndDeleteSession(scope.client, target);
+        const auth = host.snapshot().hello?.auth ?? null;
+        const archiveFirst =
+          target.archivedOnly === undefined &&
+          !target.alreadyArchived &&
+          auth !== null &&
+          hasOperatorWriteAccess(auth) &&
+          !hasOperatorAdminAccess(auth);
+        const options = {
+          ...target,
+          ...(deletion.sessionId ? { expectedSessionId: deletion.sessionId } : {}),
+        };
+        if (archiveFirst) {
+          await requestSessionPatch(scope.client, target.key, { archived: true }, options);
+          if (!host.connection.isCurrent(scope) || !owns(deletion)) {
+            throw new Error("Session archive completed on a replaced Gateway connection");
+          }
+        }
+        const response = await requestSessionDelete(scope.client, target.key, {
+          ...options,
+          ...(archiveFirst || target.alreadyArchived ? { archivedOnly: true } : {}),
+        });
         if (!owns(deletion)) {
           return { deleted: false };
         }

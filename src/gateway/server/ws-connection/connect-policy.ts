@@ -2,7 +2,7 @@ import type { ConnectParams } from "../../../../packages/gateway-protocol/src/in
 import { roleCanSkipDeviceIdentity } from "../../role-policy.js";
 import type { GatewayRole } from "../../role-policy.types.js";
 
-export type ControlUiPairingKind = "tailscale-device" | "aimarkets-ticket" | "auth-none" | null;
+export type ControlUiPairingKind = "tailscale-device" | "auth-none" | "aimarkets-ticket" | null;
 
 export function shouldSkipControlUiPairing(params: {
   isControlUi: boolean;
@@ -10,11 +10,6 @@ export function shouldSkipControlUiPairing(params: {
   role: GatewayRole;
   authMode?: string;
   authMethod?: string;
-  /**
-   * Fork (AI Markets): caller verified ticket enforcement is on, the host is an
-   * aimarkets host and the upgrade carries a valid signed aimt ticket.
-   */
-  aimarketsTicketVerified?: boolean;
 }): ControlUiPairingKind {
   if (
     params.isControlUi &&
@@ -23,19 +18,6 @@ export function shouldSkipControlUiPairing(params: {
     params.device
   ) {
     return "tailscale-device";
-  }
-  // AI Markets buyers launch the Control UI with the derived shared token plus a
-  // signed per-buyer ticket; that ticket is the device/owner proof. Like the
-  // tailscale case this only waives first-time pairing for a presented device;
-  // known devices still go through the normal paired-device checks.
-  if (
-    params.isControlUi &&
-    params.role === "operator" &&
-    params.authMethod === "token" &&
-    params.aimarketsTicketVerified === true &&
-    params.device
-  ) {
-    return "aimarkets-ticket";
   }
   // When auth is completely disabled (mode=none), there is no shared secret
   // or token to gate pairing. Requiring pairing in this configuration adds

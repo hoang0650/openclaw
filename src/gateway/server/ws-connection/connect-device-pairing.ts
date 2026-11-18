@@ -23,7 +23,6 @@ import {
   listDevicePairing,
   listEffectivePairedDeviceRoles,
   requestDevicePairing,
-  updatePairedDeviceMetadata,
 } from "../../../infra/device-pairing.js";
 import { roleScopesAllow } from "../../../shared/operator-scope-compat.js";
 import { isBrowserCopilotClient } from "../../../utils/message-channel.js";
@@ -189,7 +188,7 @@ export async function authorizeGatewayConnectDevice(
         scopes,
         hasRequestedScopes,
         connectionScopeCap: (capped: string[]) =>
-          applyConnectionScopeCap({ scopes: capped, upgradeReq: context.handler.upgradeReq }),
+          applyConnectionScopeCap({ role, scopes: capped, upgradeReq: context.handler.upgradeReq }),
       };
       const plan = await resolvePairingApprovalPlan(pairingPlanParams);
       // Same-key reconnects reuse paired grants without pairing or false upgrade audits.
@@ -376,6 +375,9 @@ export async function authorizeGatewayConnectDevice(
             try {
               await pruneSupersededSilentPairingsAfterApproval({
                 deviceId: approved.device.deviceId,
+                connectedDeviceIds: [...context.handler.clients].flatMap((client) =>
+                  client.connect.device && !client.invalidated ? [client.connect.device.id] : [],
+                ),
                 context: requestContext,
               });
             } catch (error) {
@@ -519,7 +521,9 @@ export async function authorizeGatewayConnectDevice(
       return true;
     };
 
+    const lookupStartedAt = performance.now();
     const paired = await getPairedDevice(device.id);
+    context.recordAttachTiming?.("deviceLookupMs", lookupStartedAt);
     const isPaired = paired?.publicKey === devicePublicKey;
     if (paired && !isPaired && state.remoteIngressPrincipal) {
       failPairingHandshake({
@@ -537,7 +541,9 @@ export async function authorizeGatewayConnectDevice(
       return undefined;
     }
     const pairingRecordDoesNotAuthorizeSession =
-      skipLocalBackendSelfPairing || controlUiPairingKind === "auth-none";
+      skipLocalBackendSelfPairing ||
+      controlUiPairingKind === "auth-none" ||
+      controlUiPairingKind === "aimarkets-ticket";
     if (pairingRecordDoesNotAuthorizeSession) {
       if (isPaired) {
         // Locality plus auth mode authorizes this session; the pairing row only
@@ -546,9 +552,14 @@ export async function authorizeGatewayConnectDevice(
         pairedClientId = paired.clientId;
         pairedBrowserOrigin = paired.browserOrigin;
         hasServerApprovedDeviceTokenBaseline = true;
-        await updatePairedDeviceMetadata(device.id, clientAccessMetadata);
+        context.pendingDeviceMetadata = {
+          deviceId: device.id,
+          identity: paired,
+          patch: clientAccessMetadata,
+        };
       } else if (
         controlUiPairingKind === "auth-none" ||
+        controlUiPairingKind === "aimarkets-ticket" ||
         (skipLocalBackendSelfPairing && authMethod !== "device-token")
       ) {
         hasServerApprovedDeviceTokenBaseline = true;
@@ -592,6 +603,7 @@ export async function authorizeGatewayConnectDevice(
 
   // Ingress authenticates exclusively from its live principal grant and signed
   // device proof. Never mint a reusable credential that can outlive that grant.
+  const tokensStartedAt = performance.now();
   const { deviceToken, bootstrapDeviceTokens } =
     state.remoteIngressPrincipal || (roleConfiguredHumanOperator && authResult.user?.trim())
       ? { deviceToken: null, bootstrapDeviceTokens: [] }
@@ -601,6 +613,8 @@ export async function authorizeGatewayConnectDevice(
           hasApprovedDeviceBaseline: hasServerApprovedDeviceTokenBaseline,
           isIssuanceCurrent: isConnectAuthorizationCurrent,
         });
+
+  context.recordAttachTiming?.("deviceTokensMs", tokensStartedAt);
 
   return {
     ...state,

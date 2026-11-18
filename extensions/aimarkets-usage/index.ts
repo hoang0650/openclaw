@@ -1,12 +1,13 @@
-﻿/**
+/**
  * AI Markets OpenClaw usage policy.
  *
  * AI Markets sells agents only: buyers bring their own provider API keys
  * (stored in ai-marketplace-api) and pay providers directly, so BYOK runs are
- * never billed. OpenRouter free models stay available on the platform key for
- * trial users. PHHotel sessions are ignored (handled by phhotel-usage).
+ * never billed. Every provider model, including free OpenRouter models, requires
+ * a buyer-owned key. PHHotel sessions are ignored (handled by phhotel-usage).
  */
 import { definePluginEntry, type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
   computeAimarketsSellCost,
   isAimarketsSession,
@@ -17,7 +18,6 @@ import {
   BYOK_CUSTOM_PROVIDER_ID,
   BYOK_PROVIDER_IDS,
   getUserKeys,
-  isOpenRouterFreeModel,
   peekUserKeys,
   registerCredentialResolver,
 } from "./byok.ts";
@@ -44,9 +44,9 @@ type PluginConfig = {
 const pendingByRun = new Map<string, PendingUsage>();
 const FLUSH_FALLBACK_MS = 45_000;
 const PHHOTEL_MODEL_BLOCK =
-  "This model is reserved for PHHotel. Pick one of your own-key models (aimarkets-byok-*) or a free OpenRouter model.";
+  "This model is reserved for PHHotel. Pick one of your own-key models (aimarkets-byok-*).";
 const PLATFORM_MODEL_BLOCK =
-  "AI Markets no longer provides paid models. Add your own provider API key in Settings → My API keys, or pick a free OpenRouter model.";
+  "AI Markets no longer provides paid models. Add your own provider API key in Settings → My API keys.";
 const BYOK_STORE_UNAVAILABLE =
   "Could not load your API keys from AI Markets right now. Please retry in a moment.";
 
@@ -66,7 +66,7 @@ function providerLabel(provider: string): string {
 
 function missingKeyMessage(provider: string): string {
   const label = providerLabel(provider);
-  return `This model uses ${label} with your own API key. Add a ${label} key in Settings → My API keys, or pick a free OpenRouter model.`;
+  return `This model uses ${label} with your own API key. Add a ${label} key in Settings → My API keys.`;
 }
 
 function splitModelRef(provider: string, model: string): { provider: string; modelId: string } {
@@ -201,26 +201,38 @@ async function reportUsage(params: {
   if (!params.userId || !params.apiBaseUrl) return;
   if (params.inputTokens <= 0 && params.outputTokens <= 0 && params.cost <= 0) return;
   try {
-    await fetch(`${params.apiBaseUrl}/v1/openclaw/usage`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...(params.serviceSecret ? { "X-Service-Secret": params.serviceSecret } : {}),
+    const { response, release } = await fetchWithSsrFGuard({
+      url: `${params.apiBaseUrl}/v1/openclaw/usage`,
+      timeoutMs: 8_000,
+      maxRedirects: 0,
+      auditContext: "aimarkets.usage.report",
+      init: {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(params.serviceSecret ? { "X-Service-Secret": params.serviceSecret } : {}),
+        },
+        body: JSON.stringify({
+          user_id: params.userId,
+          userId: params.userId,
+          inputTokens: params.inputTokens,
+          outputTokens: params.outputTokens,
+          model: params.model,
+          cost: params.byok ? 0 : params.cost,
+          markup: params.markup,
+          byok: params.byok,
+          channel: "openclaw",
+          audience: "aimarkets",
+        }),
       },
-      body: JSON.stringify({
-        user_id: params.userId,
-        userId: params.userId,
-        inputTokens: params.inputTokens,
-        outputTokens: params.outputTokens,
-        model: params.model,
-        cost: params.byok ? 0 : params.cost,
-        markup: params.markup,
-        byok: params.byok,
-        channel: "openclaw",
-        audience: "aimarkets",
-      }),
     });
+    try {
+      if (!response.ok) throw new Error(`Usage report responded HTTP ${response.status}`);
+      await response.body?.cancel();
+    } finally {
+      await release();
+    }
   } catch (err) {
     console.warn("[aimarkets-usage] report failed", err);
   }
@@ -240,29 +252,37 @@ export default definePluginEntry({
         ? cfg.markup
         : AIMARKETS_PROVIDER_MARKUP;
 
+    // Shared host tools can read process/workspace secrets. Buyer execution stays
+    // text-only until the host supplies a real per-buyer execution sandbox.
+    api.on("before_tool_call", (_event, ctx) => {
+      const sessionKey = ctx.sessionKey || ctx.sessionId || "";
+      if (!isAimarketsSession(sessionKey)) return undefined;
+      return {
+        block: true,
+        blockReason:
+          "AI Markets tool execution is unavailable because isolated per-buyer execution is not configured. Text-only chat with your own API key is available.",
+      };
+    });
+
     // Runs on every embedded run; must never hand platform credentials to a
     // BYOK provider on an AI Markets session.
-    registerCredentialResolver("aimarkets-byok", async ({ sessionKey, provider, modelId }) => {
+    registerCredentialResolver("aimarkets-byok", async ({ sessionKey, provider }) => {
       if (!isAimarketsSession(sessionKey)) return null;
       const providerId = String(provider || "").toLowerCase();
-      if (!BYOK_PROVIDER_IDS.has(providerId)) return null;
+      if (!BYOK_PROVIDER_IDS.has(providerId)) throw new Error(PLATFORM_MODEL_BLOCK);
       const userId = sessionOwnerId(sessionKey);
-      const freeTrial = isOpenRouterFreeModel(providerId, modelId);
       if (!userId) {
-        if (freeTrial) return null;
         throw new Error(missingKeyMessage(providerId));
       }
       let keys: Awaited<ReturnType<typeof getUserKeys>>;
       try {
         keys = await getUserKeys({ apiBaseUrl, serviceSecret, userId });
       } catch (err) {
-        if (freeTrial) return null;
         console.warn("[aimarkets-usage] BYOK key store unavailable", err);
         throw new Error(BYOK_STORE_UNAVAILABLE, { cause: err });
       }
       const key = keys[providerId];
       if (!key) {
-        if (freeTrial) return null;
         throw new Error(missingKeyMessage(providerId));
       }
       return {
@@ -318,7 +338,6 @@ export default definePluginEntry({
       if (!ref.provider) {
         return { outcome: "pass" as const };
       }
-      const freeTrial = isOpenRouterFreeModel(ref.provider, ref.modelId);
       if (!BYOK_PROVIDER_IDS.has(ref.provider)) {
         return {
           outcome: "block" as const,
@@ -326,9 +345,6 @@ export default definePluginEntry({
           category: "policy",
           message: PLATFORM_MODEL_BLOCK,
         };
-      }
-      if (freeTrial) {
-        return { outcome: "pass" as const };
       }
       const userId = sessionOwnerId(sessionId);
       if (!userId) {
@@ -392,7 +408,9 @@ export default definePluginEntry({
       const provider = readString(event?.provider, asRecord(ctx).modelProviderId).toLowerCase();
       const userId = resolveUserId(cfg, sessionId, ctx);
       const owner = sessionOwnerId(sessionId);
-      const byok = Boolean(owner && provider && peekUserKeys(owner)?.[provider]);
+      const byok = Boolean(
+        owner && provider && peekUserKeys({ apiBaseUrl, serviceSecret, userId: owner })?.[provider],
+      );
       let bag = pendingByRun.get(runId);
       if (!bag) {
         bag = {
