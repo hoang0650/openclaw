@@ -194,14 +194,7 @@ export function guardAimarketsSessionOnStartup<T extends Loc>(
 }
 
 export function isForeignAimarketsSessionError(message: string | null | undefined): boolean {
-  const text = String(message ?? "");
-  return (
-    text.includes(FOREIGN_SESSION_MESSAGE) ||
-    /buyer tickets? cannot access shared gateway (?:administration|admin) or global data/i.test(
-      text,
-    ) ||
-    /shared gateway (?:administration|admin).*global data/i.test(text)
-  );
+  return String(message ?? "").includes(FOREIGN_SESSION_MESSAGE);
 }
 
 /**

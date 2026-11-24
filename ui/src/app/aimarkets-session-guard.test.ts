@@ -112,12 +112,12 @@ describe("aimarkets session guard", () => {
     expect(replace).toHaveBeenCalledOnce();
   });
 
-  it("recognizes the shared-gateway buyer policy error and repairs a global selection", () => {
+  it("repairs a global selection without treating a policy denial as a foreign session", () => {
     expect(
       isForeignAimarketsSessionError(
         "AI Markets buyer tickets cannot access shared gateway administration or global data.",
       ),
-    ).toBe(true);
+    ).toBe(false);
     localStorage.setItem(
       SETTINGS,
       JSON.stringify({ sessionKey: "global", lastActiveSessionKey: "global" }),

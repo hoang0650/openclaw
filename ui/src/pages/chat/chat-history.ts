@@ -1,6 +1,7 @@
 import type { ChatEvent } from "../../../../packages/gateway-protocol/src/schema/logs-chat.ts";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { AgentsListResult } from "../../api/types.ts";
+import { isAimarketsHostname } from "../../app/audience-models.ts";
 import {
   areUiSessionKeysEquivalent,
   isUiSelectedGlobalSessionKey,
@@ -31,6 +32,10 @@ type LoadChatHistoryOptions = {
 
 type ChatErrorDetail = Extract<ChatEvent, { state: "error" }>["errorDetail"];
 
+export function resolveChatHistoryMethod(startup: boolean, hostname?: string) {
+  return startup && !isAimarketsHostname(hostname) ? "chat.startup" : "chat.history";
+}
+
 export async function loadChatHistory(
   state: ChatHistoryHost,
   opts: LoadChatHistoryOptions = {},
@@ -49,7 +54,8 @@ export async function loadChatHistory(
     state.chatLoading = true;
     return undefined;
   }
-  const method = startup ? "chat.startup" : "chat.history";
+  // Marketplace buyer tickets only admit the session-scoped history RPC.
+  const method = resolveChatHistoryMethod(startup, globalThis.location?.hostname);
   const client = state.client;
   const sessions = state.sessions;
   const connectionEpoch = state.connectionEpoch;

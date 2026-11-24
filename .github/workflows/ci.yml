@@ -1771,6 +1771,10 @@ jobs:
           PROTOCOL_SINCE_BASE_SHA: *diff_base
         run: |
           set -euo pipefail
+          if ! command -v rg >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ripgrep
+          fi
           source .ci-harness/scripts/ci-collect-checks.sh
           prepare_ratchet_base_args "$BASE_SHA"
           run_check max-lines pnpm check:max-lines-ratchet "${ratchet_base_args[@]}"
