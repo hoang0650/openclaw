@@ -138,10 +138,10 @@ export function scrubForeignPersistedSessions(userId: string, storage?: Storage 
       }
       let dirty = false;
       for (const field of ["sessionKey", "lastActiveSessionKey"]) {
-        if (
-          typeof parsed[field] === "string" &&
-          isForeignMarketSession(parsed[field] as string, userId)
-        ) {
+        // Buyer UIs must never retain the shared/global session selected by the
+        // generic Control UI. Pin every persisted selection to this buyer's
+        // private session; this also repairs stale state after a policy upgrade.
+        if (typeof parsed[field] === "string" && parsed[field] !== `market-${userId}`) {
           parsed[field] = `market-${userId}`;
           dirty = true;
         }
@@ -194,7 +194,14 @@ export function guardAimarketsSessionOnStartup<T extends Loc>(
 }
 
 export function isForeignAimarketsSessionError(message: string | null | undefined): boolean {
-  return String(message ?? "").includes(FOREIGN_SESSION_MESSAGE);
+  const text = String(message ?? "");
+  return (
+    text.includes(FOREIGN_SESSION_MESSAGE) ||
+    /buyer tickets? cannot access shared gateway (?:administration|admin) or global data/i.test(
+      text,
+    ) ||
+    /shared gateway (?:administration|admin).*global data/i.test(text)
+  );
 }
 
 /**

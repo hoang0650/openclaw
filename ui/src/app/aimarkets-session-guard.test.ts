@@ -111,4 +111,21 @@ describe("aimarkets session guard", () => {
     expect(recoverFromForeignAimarketsSession(win, 1_005_000)).toBe(false);
     expect(replace).toHaveBeenCalledOnce();
   });
+
+  it("recognizes the shared-gateway buyer policy error and repairs a global selection", () => {
+    expect(
+      isForeignAimarketsSessionError(
+        "AI Markets buyer tickets cannot access shared gateway administration or global data.",
+      ),
+    ).toBe(true);
+    localStorage.setItem(
+      SETTINGS,
+      JSON.stringify({ sessionKey: "global", lastActiveSessionKey: "global" }),
+    );
+    expect(scrubForeignPersistedSessions(ME)).toBe(true);
+    expect(JSON.parse(localStorage.getItem(SETTINGS)!)).toMatchObject({
+      sessionKey: `market-${ME}`,
+      lastActiveSessionKey: `market-${ME}`,
+    });
+  });
 });
