@@ -24,6 +24,7 @@ import {
   type RouteId,
 } from "./app-route-paths.ts";
 import type { SolidRouteProps } from "./app-route-types.ts";
+import { resolveAimarketsCurrentUserId } from "./app/aimarkets-session-guard.ts";
 import type { ApplicationContext } from "./app/context.ts";
 import { gatewayPresentationScope } from "./app/gateway-presentation-scope.ts";
 import { retryControlUiImport } from "./app/stale-chunk-reload.ts";
@@ -166,11 +167,20 @@ export function warmApplicationRouteModule(
   }
 }
 
-function canonicalRouteLocation(
+export function canonicalRouteLocation(
   routeId: RouteId | null,
   location: RouteLocation,
   basePath: string,
+  hostname = globalThis.location?.hostname,
 ): RouteLocation {
+  const buyerId = resolveAimarketsCurrentUserId(hostname, location);
+  if (buyerId && routeId !== "chat" && routeId !== "connection" && routeId !== "my-api-keys") {
+    return {
+      pathname: `${pathForRoute("chat", basePath)}/main/~key/market-${buyerId}`,
+      search: "",
+      hash: "",
+    };
+  }
   return routeId === "workboard"
     ? (resolveWorkboardRouteLocation(location, basePath).canonicalLocation ?? location)
     : routeId === "plugin"
@@ -186,17 +196,21 @@ export function createApplicationRouter(): ApplicationRouter {
   // ids, hub tabs, and session refs are runtime data, so the app owns those paths.
   return {
     ...router,
-    navigate: (routeId, context, options, location) =>
-      context.nativeConversation?.interceptNavigation(
-        location ?? locationForRoute(routeId, context.basePath),
-      )
-        ? Promise.resolve()
-        : router.navigate(
-            routeId,
-            context,
-            options,
-            location ? canonicalRouteLocation(routeId, location, context.basePath) : undefined,
-          ),
+    navigate: (routeId, context, options, location) => {
+      const requested = location ?? locationForRoute(routeId, context.basePath);
+      const target = canonicalRouteLocation(routeId, requested, context.basePath);
+      if (context.nativeConversation?.interceptNavigation(target)) {
+        return Promise.resolve();
+      }
+      return router.navigate(
+        target.pathname !== requested.pathname
+          ? (routeIdFromPath(target.pathname, context.basePath) ?? routeId)
+          : routeId,
+        context,
+        options,
+        location || target !== requested ? target : undefined,
+      );
+    },
     routeIdFromPath,
   };
 }

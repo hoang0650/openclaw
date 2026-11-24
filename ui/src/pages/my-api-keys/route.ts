@@ -1,5 +1,4 @@
 import { definePage } from "@openclaw/uirouter";
-import { html } from "lit";
 import { routePageSpec } from "../../app-route-paths.ts";
 
 export const page = definePage({
@@ -7,6 +6,6 @@ export const page = definePage({
   component: () =>
     import("./my-api-keys-page.ts").then(() => ({
       header: true,
-      render: () => html`<openclaw-my-api-keys-page></openclaw-my-api-keys-page>`,
+      renderSolid: () => document.createElement("openclaw-my-api-keys-page"),
     })),
 });

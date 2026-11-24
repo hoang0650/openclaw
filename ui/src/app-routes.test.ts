@@ -5,7 +5,25 @@ import {
   routeIdFromPath,
   sameRouteLocation,
 } from "./app-route-paths.ts";
-import { createApplicationRouter } from "./app-routes.ts";
+import { canonicalRouteLocation, createApplicationRouter } from "./app-routes.ts";
+
+it("routes a buyer dashboard link to the buyer's private chat", () => {
+  const buyerId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+  const location = { pathname: "/dashboards", search: "", hash: "" };
+  const target = canonicalRouteLocation(
+    "dashboards",
+    location,
+    "",
+    `${buyerId}.openclaw.aimarkets.vn`,
+  );
+  expect(target.pathname).toBe(`/chat/main/~key/market-${buyerId}`);
+  expect(routeIdFromPath(target.pathname, "")).toBe("chat");
+  expect(canonicalRouteLocation("dashboards", location, "", "localhost")).toBe(location);
+  const keys = { ...location, pathname: "/settings/my-api-keys" };
+  expect(canonicalRouteLocation("my-api-keys", keys, "", `${buyerId}.openclaw.aimarkets.vn`)).toBe(
+    keys,
+  );
+});
 
 // Page definitions derive path/aliases from the route table via routePageSpec,
 // so router matching cannot disagree with routeIdFromPath/base-path inference

@@ -18,7 +18,6 @@ export type ByokKey = {
   updatedAt: string | null;
 };
 
-const API_OVERRIDE_STORAGE_KEY = "openclaw.aimarkets.api.v1";
 const DEFAULT_API_BASE = "https://api.aimarkets.vn";
 
 /** Model aliases in openclaw.json served by each BYOK provider. */
@@ -36,18 +35,6 @@ export const BYOK_PROVIDER_MODELS: Readonly<Record<string, readonly string[]>> =
   xai: ["aimarkets-byok-grok"],
   "byok-custom": ["aimarkets-byok-custom"],
 };
-
-export function resolveMarketApiBase(): string {
-  try {
-    const override = globalThis.localStorage?.getItem(API_OVERRIDE_STORAGE_KEY)?.trim();
-    if (override && /^https:\/\//i.test(override)) {
-      return override.replace(/\/+$/, "");
-    }
-  } catch {
-    // ignore storage errors
-  }
-  return DEFAULT_API_BASE;
-}
 
 export class ByokApiError extends Error {
   constructor(
@@ -72,7 +59,7 @@ async function request<T>(
   if (init.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(`${resolveMarketApiBase()}/v1/openclaw/byok${path}`, {
+  const res = await fetch(`${DEFAULT_API_BASE}/v1/openclaw/byok${path}`, {
     method: init.method ?? "GET",
     headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
