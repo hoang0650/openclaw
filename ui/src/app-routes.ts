@@ -174,6 +174,9 @@ export function canonicalRouteLocation(
   hostname = globalThis.location?.hostname,
 ): RouteLocation {
   const buyerId = resolveAimarketsCurrentUserId(hostname, location);
+  if (buyerId && routeId === "settings") {
+    return locationForRoute("my-api-keys", basePath);
+  }
   if (buyerId && routeId !== "chat" && routeId !== "connection" && routeId !== "my-api-keys") {
     return {
       pathname: `${pathForRoute("chat", basePath)}/main/~key/market-${buyerId}`,

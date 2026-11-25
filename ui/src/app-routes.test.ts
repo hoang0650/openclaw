@@ -7,6 +7,18 @@ import {
 } from "./app-route-paths.ts";
 import { canonicalRouteLocation, createApplicationRouter } from "./app-routes.ts";
 
+it("opens API key settings from the buyer settings menu", () => {
+  const location = { pathname: "/settings", search: "", hash: "" };
+  const target = canonicalRouteLocation(
+    "settings",
+    location,
+    "",
+    "aaaaaaaaaaaaaaaaaaaaaaaa.openclaw.aimarkets.vn",
+  );
+  expect(routeIdFromPath(target.pathname, "")).toBe("my-api-keys");
+  expect(canonicalRouteLocation("settings", location, "", "localhost")).toBe(location);
+});
+
 it("routes a buyer dashboard link to the buyer's private chat", () => {
   const buyerId = "aaaaaaaaaaaaaaaaaaaaaaaa";
   const location = { pathname: "/dashboards", search: "", hash: "" };
