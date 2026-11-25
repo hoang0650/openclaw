@@ -3,6 +3,7 @@ import { normalizeUniqueTrimmedStringList } from "@openclaw/normalization-core/s
 import { registerListener } from "../../../../src/shared/listeners.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { AgentIdentityResult } from "../../api/types.ts";
+import { isAimarketsHostname } from "../../app/audience-models.ts";
 import { gatewayPresentationScope } from "../../app/gateway-presentation-scope.ts";
 import type { ApplicationGatewaySnapshot } from "../../app/gateway.ts";
 import { hasOperatorSelfReadAccess } from "../../app/operator-access.ts";
@@ -52,6 +53,9 @@ export function fetchAgentIdentity(
   client: GatewayBrowserClient,
   agentId: string,
 ): Promise<AgentIdentityResult | null> {
+  if (isAimarketsHostname(globalThis.location?.hostname)) {
+    return Promise.resolve(null);
+  }
   let cache = identityRequests.get(client);
   if (!cache) {
     cache = new Map();

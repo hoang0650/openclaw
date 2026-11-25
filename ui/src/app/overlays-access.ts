@@ -1,4 +1,5 @@
 import type { GatewayBrowserClient } from "../api/gateway.ts";
+import { isAimarketsHostname } from "./audience-models.ts";
 import { refreshPendingApprovalQueue, type ExecApprovalPromptState } from "./exec-approval.ts";
 import type { ApplicationGateway } from "./gateway.ts";
 import { readGatewayOperatorAccess } from "./operator-access.ts";
@@ -45,6 +46,9 @@ export function createOverlayApprovalRefresher(params: {
     reviewGeneration = params.getReviewGeneration(),
   ) => {
     cancel();
+    if (isAimarketsHostname(globalThis.location?.hostname)) {
+      return;
+    }
     const refreshGeneration = generation;
     let retryDelayMs = 1_000;
     const isCurrent = () =>

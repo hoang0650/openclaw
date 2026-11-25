@@ -10,6 +10,7 @@ import { createChangeListeners } from "../../../src/shared/listeners.js";
 import { GatewayRequestError, type GatewayEventFrame } from "../api/gateway.ts";
 import { t } from "../i18n/index.ts";
 import { formatUiError } from "../lib/format-error.ts";
+import { isAimarketsHostname } from "./audience-models.ts";
 import {
   invalidateQuestionList,
   publishQuestionClientResolution,
@@ -431,6 +432,9 @@ export function refreshPendingQuestionsWithRetry(
   client: QuestionClient,
   isCurrentClient: () => boolean = () => state.client === client,
 ): void {
+  if (isAimarketsHostname(globalThis.location?.hostname)) {
+    return;
+  }
   const clientGeneration = state.clientGeneration;
   const refreshIsCurrent = () =>
     state.client === client && state.clientGeneration === clientGeneration && isCurrentClient();
